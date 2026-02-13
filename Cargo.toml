@@ -1,0 +1,32 @@
+[package]
+name = "test_os_v2"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+_internal_debug = ["disable-check", "debug-mode"]
+
+disable-check = []
+debug-mode = []
+
+[dependencies]
+uefi = { version = "0.36.1", features = ["alloc", "logger"], default-features = false }
+uefi-raw = "0.13.0"
+bincode = { version = "2.0.1", default-features = false, features = ["alloc", "serde"] }
+fontdue = { version = "0.9.3", default-features = false, features = ["hashbrown"] }
+rustybuzz = { version = "0.20.1", default-features = false }
+spin = "0.10.0"
+bitflags = "2.10.0"
+miniz_oxide = { version = "0.9.0", default-features = false, features = ["with-alloc"] }
+proc-bitfield = "0.5.3"
+num-traits = "0.2.19"
+
+[profile.for_uefi]
+inherits = "dev"
+panic = "abort"
+
+[target.'cfg(all(target_arch = "x86_64", target_os = "none"))']
+rustflags = [
+    "-Z", "cf-protection=branch",
+    "-C", "target_cpu=x86-64-v3/"
+]
