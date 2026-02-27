@@ -1,6 +1,6 @@
 use core::ops::{Add, Sub};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MemMap<T = u64> {
     pub start: T,
     pub end: T,
@@ -19,7 +19,7 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MemData<T = u64> {
     pub start: T,
     pub len: T,

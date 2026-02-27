@@ -3,11 +3,11 @@
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::f32::math::{ceil, round};
 use fontdue::{Font, FontSettings, Metrics};
+use libm::{ceil, round};
 use crate::{LINE_SPACING, ENABLE_LIGATURES};
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 /// テキストの映像のやつ
 /// 理解できるかな？
 ///
@@ -61,7 +61,7 @@ pub fn gets_control_character_supported(
         .horizontal_line_metrics(px)
         .map(|lm| {
             let h = lm.ascent + lm.descent + lm.line_gap;
-            (ceil(h) as i32).max(1)
+            (ceil(h as f64) as i32).max(1)
         })
         .unwrap_or(px as i32);
 
@@ -74,7 +74,7 @@ pub fn gets_control_character_supported(
             '\r' => { prev_cr = true; }
             '\n' => {
                 if !buf.is_empty() {
-                    all_texts.append(&mut gets_with_obj(&analyzed_text, &font_obj, font_bytes, &buf, px, start_x, round(baseline_y) as i32));
+                    all_texts.append(&mut gets_with_obj(&analyzed_text, &font_obj, font_bytes, &buf, px, start_x, round(baseline_y as f64) as i32));
                     buf.clear();
                 }
                 baseline_y += line_height as f32 * LINE_SPACING;
@@ -83,7 +83,7 @@ pub fn gets_control_character_supported(
             c => {
                 if prev_cr {
                     if !buf.is_empty() {
-                        all_texts.append(&mut gets_with_obj(&analyzed_text, &font_obj, font_bytes, &buf, px, start_x, round(baseline_y) as i32));
+                        all_texts.append(&mut gets_with_obj(&analyzed_text, &font_obj, font_bytes, &buf, px, start_x, round(baseline_y as f64) as i32));
                         buf.clear();
                     }
                     prev_cr = false;
@@ -108,7 +108,7 @@ pub fn gets_control_character_supported(
 /// * `px` - ピクセルサイズ
 /// * `x` - 開始地点
 /// * `y` - 開始地点
-fn gets_with_obj(analyzed_text: &Vec<u16>, font_obj: &Font, _font_bytes: &[u8], _text: &str, px: f32, x: i32, y: i32) -> Vec<Text> {
+pub fn gets_with_obj(analyzed_text: &Vec<u16>, font_obj: &Font, _font_bytes: &[u8], _text: &str, px: f32, x: i32, y: i32) -> Vec<Text> {
     let mut ret = vec![];
     let mut pen_x = x;
 

@@ -1,6 +1,7 @@
 use alloc::string::String;
 use core::arch::asm;
 use core::arch::x86_64::{CpuidResult, __cpuid_count};
+use crate::cpu::utils;
 
 #[derive(Debug, Clone)]
 pub enum CpuVendor {
@@ -98,6 +99,8 @@ pub mod cpuid {
             #[allow(unused_imports)]
             #[deprecated(note = "Use v2 instead of v1 directly")]
             pub use super::v1::*;
+
+            pub const X2_APIC_ID: u32 = 0x0B;
         }
 
         pub mod v3 {
@@ -168,4 +171,18 @@ pub unsafe fn get_cpu_vendor() -> CpuVendor {
         (0x68747541, 0x69746e65, 0x444d4163) => CpuVendor::Amd,
         _ => CpuVendor::Other,
     }
+}
+
+#[inline]
+pub fn who_am_i() -> u32 {
+    unsafe{cpuid(cpuid::x64::v2::X2_APIC_ID, None)}.edx
+}
+
+#[inline]
+pub unsafe fn get_reversion(typ: CpuVendor) -> u32 {
+    unsafe{match typ {
+        CpuVendor::Intel => (utils::read_msr(0x8B) >> 32) as u32,
+        CpuVendor::Amd => utils::read_msr(0x8B) as u32,
+        _ => 0,
+    }}
 }

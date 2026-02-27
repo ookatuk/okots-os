@@ -132,7 +132,7 @@ impl InternalBoundaryTagFrameAllocator {
             }
         }
 
-        Err(Error::new(ErrorType::NoMemory, Some("Table full: No adjacent free page found")))
+        Err(Error::new(ErrorType::AllocationFailed, Some("Table full: No adjacent free page found")))
     }
 
     unsafe fn alloc(&mut self, layout: Layout) -> *mut u8 {
@@ -163,6 +163,7 @@ impl InternalBoundaryTagFrameAllocator {
                     unsafe{(block_start_addr as *mut u32).write(new_available_pages as u32)};
                 }
 
+                let _ = self.try_add_table_map();
                 return last_aligned_addr as *mut u8;
             }
         }

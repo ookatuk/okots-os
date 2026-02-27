@@ -8,7 +8,6 @@ pub type Result<Output = ()> = core::result::Result<Output, Error>;
 
 #[derive(Debug, Clone)]
 pub enum ErrorType {
-    GopNotFound,
     NotSupported,
     InvalidFileType,
     InvalidData,
@@ -18,7 +17,9 @@ pub enum ErrorType {
     OtherError,
     NotFound,
     OverFlow,
-    NoMemory,
+    InternalError,
+    UefiBroken,
+    DeviceError,
 }
 
 impl From<uefi::Error> for ErrorType {
@@ -111,7 +112,7 @@ impl<T: core::fmt::Debug> TryFrom<uefi::Result<T>> for Error {
     fn try_from(value: uefi::Result<T>) -> core::result::Result<Self, Self::Error> {
         if value.is_ok() { return Err(()); }
 
-        Ok(Self::from(value.unwrap_err()))
+        Ok(unsafe{Self::from(value.unwrap_err_unchecked())})
     }
 }
 
