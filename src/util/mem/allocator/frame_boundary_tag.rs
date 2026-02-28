@@ -23,7 +23,7 @@ fn insert<T>(target: *mut T, index: usize, value: T, max: usize) {
 }
 
 pub struct InternalBoundaryTagFrameAllocator {
-    pub(crate) table_ptr: MemMap<NonNull<u32>>,
+    pub table_ptr: MemMap<NonNull<u32>>,
     table_len:  u32,
 }
 
@@ -332,3 +332,6 @@ unsafe impl GlobalAlloc for BoundaryTagFrameAllocator {
         unsafe{self.0.lock().realloc(ptr, layout, new_size)}
     }
 }
+
+unsafe impl Send for InternalBoundaryTagFrameAllocator {}
+unsafe impl Sync for InternalBoundaryTagFrameAllocator {}

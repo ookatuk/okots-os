@@ -125,7 +125,7 @@ pub unsafe fn write_msr(target: u32, value: u64) {
         in("ecx") target,
         in("eax") value & 0xFFFF_FFFF,
         in("edx") value >> 32,
-        options(nostack, preserves_flags)
+        options(nostack, preserves_flags, nomem)
     )};
 }
 
@@ -136,7 +136,8 @@ pub unsafe fn read_msr(msr: u32) -> u64 {
         "rdmsr",
         in("ecx") msr,
         out("eax") low,
-        out("edx") high
+        out("edx") high,
+        options(nostack, preserves_flags, nomem)
     )};
 
     ((high as u64) << 32) | (low as u64)
@@ -175,7 +176,13 @@ pub unsafe fn get_cpu_vendor() -> CpuVendor {
 
 #[inline]
 pub fn who_am_i() -> u32 {
-    unsafe{cpuid(cpuid::x64::v2::X2_APIC_ID, None)}.edx
+    let res = unsafe { cpuid(cpuid::x64::v2::X2_APIC_ID, None) };
+    if res.ebx != 0 {
+        return res.edx;
+    }
+
+    let res = unsafe { cpuid(cpuid::common::PIAFB, None) };
+    (res.ebx >> 24) & 0xFF
 }
 
 #[inline]

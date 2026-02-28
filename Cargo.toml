@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-_internal_debug = ["disable-check", "debug-mode"]
+_internal_debug = ["debug-mode"]
 
 disable-check = []
 debug-mode = []
@@ -24,19 +24,10 @@ serde = { version = "1.0.228", default-features = false, features = ["derive", "
 x86_64 = { version = "0.15.4", features = ["instructions", "nightly"] }
 libm = { version = "0.2.16", default-features = false, features = ["arch"] }
 uart_16550 = { version = "0.4.0", default-features = false, features = ["stable"] }
+acpi = "6.1.0"
 
 [profile.dev]
 panic = "abort"
 
 [profile.release]
 panic = "abort"
-
-[target.'cfg(all(target_arch = "x86_64", target_os = "none"))']
-rustflags = [
-    "-Z", "cf-protection=full",
-    "-C", "relocation-model=pic",
-    "-C", "target-cpu=x86-64-v2",     # スラッシュを削除
-    "-C", "target-feature=+sse2",
-    "-C", "no-redzone=y",             # UEFI/カーネルでは必須
-    "-C", "panic=abort",              # unwindingは通常使えないため
-]

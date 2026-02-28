@@ -10,6 +10,10 @@ pub struct InternalSlab {
 }
 
 impl InternalSlab {
+    const fn header_size() -> usize {
+        core::mem::offset_of!(Self, data)
+    }
+
     pub unsafe fn init_at(ptr: *mut u8, slot_size: u32, next: Option<NonNull<InternalSlab>>) -> &'static mut Self {
         let slab = unsafe{&mut *(ptr as *mut Self)};
         slab.bitmap = [0, 0];
@@ -26,7 +30,7 @@ impl InternalSlab {
             let first_free = (!*map).trailing_zeros();
             if first_free < 64 {
                 let slot_idx = (i * 64) + first_free as usize;
-                let offset = 32 + (slot_idx * self.slot_size as usize);
+                let offset = Self::header_size() + (slot_idx * self.slot_size as usize);
                 if offset + size <= 4096 {
                     *map |= 1 << first_free;
                     return unsafe{Some((self as *mut Self as *mut u8).add(offset))};
@@ -38,7 +42,7 @@ impl InternalSlab {
 
     pub unsafe fn dealloc(&mut self, ptr: *mut u8) {
         let offset = (ptr as usize) - (self as *mut Self as usize);
-        let slot_idx = (offset - 32) / self.slot_size as usize;
+        let slot_idx = (offset - Self::header_size()) / self.slot_size as usize;
         self.bitmap[slot_idx >> 6] &= !(1 << (slot_idx & 63));
     }
 }

@@ -1,0 +1,15 @@
+[build]
+target = "x86_64-unknown-uefi"
+
+
+[target.x86_64-unknown-uefi]
+rustflags = [
+    "-Z", "cf-protection=full",
+    "-C", "relocation-model=pic",
+    "-C", "target-cpu=x86-64-v2",
+    "-C", "no-redzone=y",
+    "-C", "panic=abort",
+    "-C", "force-frame-pointers=yes",
+]
+
+runner = "sh ./scripts/run.sh"

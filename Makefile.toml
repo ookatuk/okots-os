@@ -1,0 +1,16 @@
+[config]
+skip_core_tasks = true
+
+[tasks.build]
+command = "cargo"
+args = ["build", "${@}"]
+
+[tasks.iso]
+script = [
+    "cargo make build --release ${@}",
+    "sh ./scripts/build_iso.sh ${@}"
+]
+
+[tasks.run]
+command = "cargo"
+args = ["run", "${@}"]

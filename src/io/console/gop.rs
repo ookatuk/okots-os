@@ -92,7 +92,7 @@ pub struct GopData {
 }
 
 impl GopData {
-    pub fn new(mut gop: ScopedProtocol<GraphicsOutput>) -> result::Result<Self> {
+    pub fn new(gop: ScopedProtocol<GraphicsOutput>) -> result::Result<Self> {
         let mut data = Self {
             ptr: None,
             w: NonZeroUsize::new(1).unwrap(),
@@ -138,7 +138,7 @@ impl GopData {
         };
 
         if x < w && y < h {
-            return self.draw_pixel_unchecked(x, y, color);
+            return unsafe{self.draw_pixel_unchecked(x, y, color)};
         }
 
         Error::new(
@@ -184,7 +184,7 @@ impl GopData {
         let mut curr_y = y0;
 
         loop {
-            self.draw_pixel(curr_x as usize, curr_y as usize, color)?;
+            unsafe{self.draw_pixel(curr_x as usize, curr_y as usize, color)?};
 
             if curr_x == x1 && curr_y == y1 { break; }
 
@@ -215,14 +215,14 @@ impl GopData {
             }).map_err(|e| Error::from_uefi(e, Some("Blt fill failed")));
         };
 
-        let ptr = self.ptr.unwrap_or_else(|| core::hint::unreachable_unchecked()).as_ptr();
+        let ptr = self.ptr.unwrap_or_else(|| unsafe{core::hint::unreachable_unchecked()}).as_ptr();
         let stride = self.stride.get();
 
         for py in y..(y + h) {
-            let row_ptr = ptr.add(py * stride + x);
+            let row_ptr = unsafe{ptr.add(py * stride + x)};
 
             for px in 0..w {
-                row_ptr.add(px).write_volatile(raw_color);
+                unsafe{row_ptr.add(px).write_volatile(raw_color)};
             }
         }
 
@@ -234,39 +234,41 @@ impl GopData {
             c?
         } else {
             // BltOnly の場合は UEFI の機能で一括塗り
-            return self.draw_rect(0, 0, self.w.get(), self.h.get(), color);
+            return unsafe{self.draw_rect(0, 0, self.w.get(), self.h.get(), color)};
         };
 
         let color64 = ((raw_color as u64) << 32) | (raw_color as u64);
-        let ptr = self.ptr.unwrap_or_else(|| core::hint::unreachable_unchecked()).as_ptr();
+        let ptr = self.ptr.unwrap_or_else(|| unsafe{core::hint::unreachable_unchecked()}).as_ptr();
         let w = self.w.get();
         let h = self.h.get();
         let stride = self.stride.get();
 
         if w == stride {
             let total_pixels = w * h;
-            core::arch::asm!(
-            "rep stosq",
-            inout("rcx") total_pixels / 2 => _,
-            inout("rdi") ptr => _,
-            in("rax") color64,
-            );
+            unsafe{core::arch::asm!(
+                "rep stosq",
+                inout("rcx") total_pixels / 2 => _,
+                inout("rdi") ptr => _,
+                in("rax") color64,
+                options(nostack),
+            )};
             if total_pixels % 2 != 0 {
-                ptr.add(total_pixels - 1).write_volatile(raw_color);
+                unsafe{ptr.add(total_pixels - 1).write_volatile(raw_color)};
             }
         } else {
             for y in 0..h {
-                let row_ptr = ptr.add(y * stride);
+                let row_ptr = unsafe{ptr.add(y * stride)};
 
-                core::arch::asm!(
-                "rep stosq",
-                inout("rcx") w / 2 => _,
-                inout("rdi") row_ptr as usize => _,
-                in("rax") color64,
-                );
+                unsafe{core::arch::asm!(
+                    "rep stosq",
+                    inout("rcx") w / 2 => _,
+                    inout("rdi") row_ptr as usize => _,
+                    in("rax") color64,
+                    options(nostack),
+                )};
 
                 if w % 2 != 0 {
-                    row_ptr.add(w - 1).write_volatile(raw_color);
+                    unsafe{row_ptr.add(w - 1).write_volatile(raw_color)};
                 }
             }
         }
@@ -315,4 +317,19 @@ pub fn get_gop(mut gop: ScopedProtocol<GraphicsOutput>) -> result::Result<GopDat
     log_info!("kernel", "gop", "found good gop mode. w: {}, h: {}", w, h);
 
     GopData::new(gop)
+}
+
+/// VRAM（GOP）からバックバッファへ「吸い上げる」
+pub unsafe fn capture(
+    vram_ptr: *const u32,  // GOPのベースアドレス
+    back_ptr: *mut u32,    // 自前アロケータで確保したバックバッファ
+    h: usize,
+    stride: usize,
+) {
+    for y in 0..h {
+        let src = vram_ptr.add(y * stride);
+        let dest = back_ptr.add(y * stride);
+        // 今度は VRAM(src) から RAM(dest) へコピー
+        core::ptr::copy_nonoverlapping(src, dest, stride);
+    }
 }

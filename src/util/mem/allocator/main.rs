@@ -2,8 +2,11 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::{NonNull, null_mut};
+use spin::Once;
+use x86_64::instructions::interrupts::without_interrupts;
 use crate::util::mem::allocator::frame_boundary_tag::BoundaryTagFrameAllocator;
 use crate::util::mem::allocator::slab::InternalSlab;
+use crate::util::mem::allocator::uefi_allocator::LockedAllocator;
 use crate::util::mem::types::MemData;
 
 pub struct HybridAllocatorInner {
@@ -14,8 +17,8 @@ pub struct HybridAllocatorInner {
 pub struct HybridAllocator(spin::Mutex<HybridAllocatorInner>);
 
 impl HybridAllocator {
-    pub fn new(data_list: Vec<MemData<usize>>) -> Self {
-        let mut frame_allocs = Vec::new();
+    pub fn new(data_list: Vec<MemData<usize>>, add_max: usize) -> Self {
+        let mut frame_allocs = Vec::with_capacity(add_max + data_list.len());
 
         for data in data_list {
             if let Ok((_rem, alloc)) = BoundaryTagFrameAllocator::new(data) {
@@ -29,6 +32,20 @@ impl HybridAllocator {
             slab_heads,
             frame_allocs,
         }))
+    }
+
+    pub fn add(&self, data_list: &Vec<MemData<usize>>) {
+        let mut tmp_vec = Vec::with_capacity(data_list.len());
+        for data in data_list {
+            if let Ok((_rem, alloc)) = BoundaryTagFrameAllocator::new(data.clone()) {
+                tmp_vec.push(alloc);
+            }
+        }
+
+        without_interrupts(|| {
+            let mut lock = self.0.lock();
+            lock.frame_allocs.append(&mut tmp_vec);
+        });
     }
 }
 
@@ -161,3 +178,63 @@ unsafe impl GlobalAlloc for HybridAllocator {
         }
     }
 }
+
+pub struct OsAllocator {
+    pub os_allocator: Once<HybridAllocator>,
+    pub uefi_allocator: LockedAllocator,
+}
+
+
+impl OsAllocator {
+    pub fn enable_os_allocator(&self, allocator: HybridAllocator) {
+        self.os_allocator.call_once(|| {allocator});
+    }
+
+    pub const fn new() -> Self {
+        Self {
+            os_allocator: Once::new(),
+            uefi_allocator: LockedAllocator::new(),
+        }
+    }
+}
+unsafe impl GlobalAlloc for OsAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        unsafe {
+            if self.os_allocator.is_completed() {
+                self.os_allocator.get().unwrap().alloc(layout)
+            } else {
+                self.uefi_allocator.alloc(layout)
+            }
+        }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe {
+            if self.os_allocator.is_completed() {
+                self.os_allocator.get().unwrap().dealloc(ptr, layout)
+            } else {
+                self.uefi_allocator.dealloc(ptr, layout)
+            }
+        }
+    }
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        unsafe {
+            if self.os_allocator.is_completed() {
+                self.os_allocator.get().unwrap().alloc_zeroed(layout)
+            } else {
+                self.uefi_allocator.alloc_zeroed(layout)
+            }
+        }
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        unsafe {
+            if self.os_allocator.is_completed() {
+                self.os_allocator.get().unwrap().realloc(ptr, layout, new_size)
+            } else {
+                self.uefi_allocator.realloc(ptr, layout, new_size)
+            }
+        }
+    }
+}
+
+unsafe impl Send for HybridAllocatorInner {}
+unsafe impl Sync for HybridAllocatorInner {}

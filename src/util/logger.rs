@@ -1,15 +1,13 @@
-use alloc::format;
+use alloc::borrow::Cow;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::fmt::{Display, Write};
+use core::fmt::{Display};
 use core::panic::Location;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use bincode::enc::write::Writer;
 use serde::Serialize;
 use spin::{Lazy, Once, RwLock};
 use x86_64::instructions::interrupts;
-use x86_64::instructions::interrupts::without_interrupts;
 use crate::io::console::serial::SERIAL1;
 use crate::util::timer::TSC;
 
@@ -134,52 +132,52 @@ macro_rules! log_last {
 }
 
 #[track_caller]
-pub fn _custom(level: &str, by: &str, tag: &str, text: core::fmt::Arguments) {
+pub fn _custom(level: &'static str, by: &'static str, tag: &'static str, text: core::fmt::Arguments) {
     let location = Location::caller();
-    custom_internal(level, by, tag, &*text.to_string(), location);
+    custom_internal(level, by, tag, text, location);
 }
 
 #[derive(Serialize, Clone)]
 #[repr(C)]
 pub struct OsLog {
-    pub level: String,
-    pub by: String,
-    pub tag: String,
+    pub level: Cow<'static, str>,
+    pub by: Cow<'static, str>,
+    pub tag: Cow<'static, str>,
     pub data: String,
-    pub file: String,
+    pub file: &'static str,
     pub time: u64,
     pub line: u32,
     pub column: u32,
+    pub cpu_acpi_id: u32,
 }
 
 impl Display for OsLog {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // 例: [INFO ] [PCIe ] Enumerating devices... (at drivers/pci.rs:42)
         write!(
             f,
-            "[{:<5}] [{:<5}] {} (at {}:{}:{})",
+            "({}), [{:<5}] [{:<5}] {} (at {}:{}:{})",
+            self.cpu_acpi_id,
             self.level,
             self.tag,
             self.data,
             self.file,
             self.line,
-            self.column
+            self.column,
         )
     }
 }
 
 impl OsLog {
     pub fn to_short_string(&self) -> String {
-        alloc::format!("[{}] {}: {}", self.level, self.tag, self.data)
+        alloc::format!("({}) [{}] {}: {}", self.cpu_acpi_id, self.level, self.tag, self.data)
     }
 }
 
-#[track_caller]
-pub fn custom_internal(level: &str, by: &str, tag: &str, text: &str, loc: &Location) {
+pub fn custom_internal(level: &'static str, by: &'static str, tag: &'static str, text: core::fmt::Arguments, loc: &'static Location) {
     _real_custom_internal(level, by, tag, text, loc);
 }
 
-pub fn _real_custom_internal(level: &str, by: &str, tag: &str, text: &str, loc: &Location) {
+pub fn _real_custom_internal(level: &'static str, by: &'static str, tag: &'static str, text: core::fmt::Arguments, loc: &'static Location) {
     let mut time = 0;
 
     if let Some(a) = LOG_TIMER.get() {
@@ -194,14 +192,16 @@ pub fn _real_custom_internal(level: &str, by: &str, tag: &str, text: &str, loc: 
 
     let data = OsLog {
         time,
-        level: level.to_string(),
-        by: by.to_string(),
-        tag: tag.to_string(),
+        level: Cow::Borrowed(level),
+        by: Cow::Borrowed(by),
+        tag: Cow::Borrowed(tag),
         data: text.to_string(),
 
-        file: loc.file().to_string(),
+        file: loc.file(),
         line: loc.line(),
         column: loc.column(),
+
+        cpu_acpi_id: crate::cpu::utils::who_am_i(),
     };
     let a = bincode::serde::encode_to_vec(
         data.clone(),
