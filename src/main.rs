@@ -3,7 +3,16 @@
 
 extern crate alloc;
 
-const VERSION: &str = concat!(env!("OS_CYCLE"), "-v2-0.1.0_", "0", "-", env!("OS_BUILD"));
+const VERSION_RAW: &str = "1.0.0";
+
+const MICRO_VER: u32 = 0;
+
+const VERSION: &str = formatcp!(
+    "{}-v2-{VERSION_RAW}_{MICRO_VER}-build-{}.{}",
+    env!("OS_CYCLE"),
+    env!("OS_PROFILE"),
+    env!("OS_BUILD"),
+);
 
 /// OSプロトコルバージョン.
 const DEBUG_PROTOCOL_VERSION: &str = "1.0";
@@ -39,11 +48,12 @@ use crate::mem::types::{MemData, MemMap};
 use crate::util::result::Error;
 use crate::util::timer::TSC;
 use alloc::boxed::Box;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::bitflags;
+use const_format::formatcp;
 use core::alloc::Layout;
 use core::arch::{asm, naked_asm};
 use core::cell::OnceCell;

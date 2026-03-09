@@ -2,10 +2,10 @@ use crate::log_info;
 use crate::mem::types::{MemData, MemMap};
 use crate::util::result::{Error, ErrorType};
 use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::{null_mut, NonNull};
+use core::ptr::{NonNull, null_mut};
 
 #[inline]
-fn remove<T>(target: *mut T, index: usize, max: usize) {
+const fn remove<T>(target: *mut T, index: usize, max: usize) {
     if index >= max {
         return;
     }
@@ -19,7 +19,7 @@ fn remove<T>(target: *mut T, index: usize, max: usize) {
 }
 
 #[inline]
-fn insert<T>(target: *mut T, index: usize, value: T, max: usize) {
+const fn insert<T>(target: *mut T, index: usize, value: T, max: usize) {
     unsafe {
         let ptr = target.add(index);
         core::ptr::copy(ptr, ptr.add(1), max - index);
@@ -33,7 +33,7 @@ pub struct InternalBoundaryTagFrameAllocator {
 }
 
 impl InternalBoundaryTagFrameAllocator {
-    pub fn new(arg_target: MemData<usize>) -> Result<(MemData<usize>, Self), Error> {
+    pub const fn new(arg_target: MemData<usize>) -> Result<(MemData<usize>, Self), Error> {
         if (arg_target.start & 0xFFF) != 0 || arg_target.len < 8192 {
             return Err(Error::new(
                 ErrorType::InvalidData,
@@ -41,26 +41,27 @@ impl InternalBoundaryTagFrameAllocator {
             ));
         }
 
-        let manage_pages = (arg_target.len >> 12).min(u32::MAX as usize);
+        let len_shifted = arg_target.len >> 12;
+        let u32_max = u32::MAX as usize;
+        let manage_pages = if len_shifted < u32_max {
+            len_shifted
+        } else {
+            u32_max
+        };
         let manage_len = manage_pages << 12;
 
-        // 管理簿は「最後」のページに置く
         let table_start_addr = arg_target.start + manage_len - 4096;
         let table_ptr = unsafe { NonNull::new_unchecked(table_start_addr as *mut u32) };
 
-        // データ領域の開始ページ番号とページ数（管理用1ページを引く）
         let data_start_page_idx = (arg_target.start >> 12) as u32;
         let data_page_count = (manage_pages - 1) as u32;
 
         unsafe {
-            // データ領域の「先頭」にサイズを書き込む
             (arg_target.start as *mut u32).write(data_page_count);
 
-            // データ領域の「末尾（管理簿の直前）」にタグを書く
             let data_end_tag_addr = table_start_addr - core::mem::size_of::<u32>();
             (data_end_tag_addr as *mut u32).write(data_page_count);
 
-            // 管理簿の最初の1件目として、データ領域の開始ページを登録
             table_ptr.as_ptr().write(data_start_page_idx);
         }
 
@@ -82,10 +83,11 @@ impl InternalBoundaryTagFrameAllocator {
         ))
     }
 
-    fn is_allocated(&self, addr: usize) -> bool {
+    const fn is_allocated(&self, addr: usize) -> bool {
         let target_page = (addr >> 12) as u32;
 
-        for i in 0..self.table_len {
+        let mut i = 0;
+        while i < self.table_len {
             let entry_ptr = unsafe { self.table_ptr.start.as_ptr().add(i as usize) };
             let start_page = unsafe { entry_ptr.read() };
 
@@ -94,12 +96,14 @@ impl InternalBoundaryTagFrameAllocator {
             if target_page >= start_page && target_page < (start_page + size) {
                 return false;
             }
+
+            i += 1;
         }
 
         true
     }
 
-    fn is_full(&self) -> bool {
+    const fn is_full(&self) -> bool {
         let max_entries = unsafe {
             self.table_ptr
                 .end

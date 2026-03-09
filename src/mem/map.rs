@@ -30,7 +30,7 @@ pub struct Map {
 }
 
 impl Map {
-    pub fn new(start: usize, end: usize, memory_type: MemoryMapType) -> Map {
+    pub const fn new(start: usize, end: usize, memory_type: MemoryMapType) -> Map {
         Map {
             data: MemMap {
                 start: start as u64,

@@ -1,5 +1,8 @@
 //! 文字をフォント(映像)に変える
 
+use crate::util::result;
+use crate::util::result::ErrorType;
+use crate::{LINE_SPACING, fs};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
@@ -9,18 +12,17 @@ use libm::{ceil, round};
 use uefi::cstr16;
 use uefi::proto::media::file::{File, FileInfo, FileMode};
 use uefi_raw::protocol::file_system::FileAttribute;
-use crate::{LINE_SPACING, fs};
-use crate::util::result;
-use crate::util::result::ErrorType;
 
 pub fn load() -> result::Result<Box<[u8]>> {
     let mut root = fs::get_root()?;
 
-    let mut file = root.open(
-        cstr16!("EFI\\BOOT\\contents\\font\\main.ttf"),
-        FileMode::Read,
-        FileAttribute::empty(),
-    ).map_err(|_| result::Error::new(ErrorType::FileNotFound, Some("Font open failed")))?
+    let mut file = root
+        .open(
+            cstr16!("EFI\\BOOT\\contents\\font\\main.ttf"),
+            FileMode::Read,
+            FileAttribute::empty(),
+        )
+        .map_err(|_| result::Error::new(ErrorType::FileNotFound, Some("Font open failed")))?
         .into_regular_file()
         .ok_or_else(|| result::Error::new(ErrorType::NotAFile, Some("Path is a directory")))?;
 
@@ -30,7 +32,8 @@ pub fn load() -> result::Result<Box<[u8]>> {
     // 0埋めした Vec を確保
     let mut buffer = vec![0u8; size];
 
-    file.read(&mut buffer).map_err(|_| result::Error::new(ErrorType::ReadError, Some("Read failed")))?;
+    file.read(&mut buffer)
+        .map_err(|_| result::Error::new(ErrorType::ReadError, Some("Read failed")))?;
 
     Ok(buffer.into_boxed_slice())
 }
@@ -99,10 +102,20 @@ pub fn gets_control_character_supported(
 
     for ch in text.chars() {
         match ch {
-            '\r' => { prev_cr = true; }
+            '\r' => {
+                prev_cr = true;
+            }
             '\n' => {
                 if !buf.is_empty() {
-                    all_texts.append(&mut gets_with_obj(&analyzed_text, &font_obj, font_bytes, &buf, px, start_x, round(baseline_y as f64) as i32));
+                    all_texts.append(&mut gets_with_obj(
+                        &analyzed_text,
+                        &font_obj,
+                        font_bytes,
+                        &buf,
+                        px,
+                        start_x,
+                        round(baseline_y as f64) as i32,
+                    ));
                     buf.clear();
                 }
                 baseline_y += line_height as f32 * LINE_SPACING;
@@ -111,7 +124,15 @@ pub fn gets_control_character_supported(
             c => {
                 if prev_cr {
                     if !buf.is_empty() {
-                        all_texts.append(&mut gets_with_obj(&analyzed_text, &font_obj, font_bytes, &buf, px, start_x, round(baseline_y as f64) as i32));
+                        all_texts.append(&mut gets_with_obj(
+                            &analyzed_text,
+                            &font_obj,
+                            font_bytes,
+                            &buf,
+                            px,
+                            start_x,
+                            round(baseline_y as f64) as i32,
+                        ));
                         buf.clear();
                     }
                     prev_cr = false;
@@ -122,7 +143,15 @@ pub fn gets_control_character_supported(
     }
 
     if !buf.is_empty() {
-        all_texts.append(&mut gets_with_obj(&analyzed_text, &font_obj, font_bytes, &buf, px, start_x, baseline_y as i32));
+        all_texts.append(&mut gets_with_obj(
+            &analyzed_text,
+            &font_obj,
+            font_bytes,
+            &buf,
+            px,
+            start_x,
+            baseline_y as i32,
+        ));
     }
 
     all_texts
@@ -136,7 +165,15 @@ pub fn gets_control_character_supported(
 /// * `px` - ピクセルサイズ
 /// * `x` - 開始地点
 /// * `y` - 開始地点
-pub fn gets_with_obj(analyzed_text: &Vec<u16>, font_obj: &Font, _font_bytes: &[u8], _text: &str, px: f32, x: i32, y: i32) -> Vec<Text> {
+pub fn gets_with_obj(
+    analyzed_text: &Vec<u16>,
+    font_obj: &Font,
+    _font_bytes: &[u8],
+    _text: &str,
+    px: f32,
+    x: i32,
+    y: i32,
+) -> Vec<Text> {
     let mut ret = vec![];
     let mut pen_x = x;
 
@@ -152,7 +189,6 @@ pub fn gets_with_obj(analyzed_text: &Vec<u16>, font_obj: &Font, _font_bytes: &[u
     ret
 }
 
-
 /// グラフメトリクスをTextにする
 /// # Args
 /// * `metrics` - メトリクス
@@ -160,22 +196,16 @@ pub fn gets_with_obj(analyzed_text: &Vec<u16>, font_obj: &Font, _font_bytes: &[u
 /// * `_px` - ピクセル
 /// * `x` - 開始地点
 /// * `y` - 開始地点
-fn internal_get(
-    metrics: Metrics,
-    bitmap: Vec<u8>,
-    _px: f32,
-    x: i32,
-    y: i32,
-) -> Text {
-    let mut ret = Text::default();
-    ret.width = metrics.width;
-    ret.height = metrics.height;
-    ret.bitmap = bitmap;
-    ret.start_x = x + metrics.xmin;
-    ret.start_y = y - metrics.height as i32 - metrics.ymin;
-    ret.advance_w = metrics.advance_width;
-    ret.advance_h = metrics.advance_height;
-    ret
+const fn internal_get(metrics: Metrics, bitmap: Vec<u8>, _px: f32, x: i32, y: i32) -> Text {
+    Text {
+        width: metrics.width,
+        height: metrics.height,
+        bitmap,
+        start_x: x + metrics.xmin,
+        start_y: y - metrics.height as i32 - metrics.ymin,
+        advance_w: metrics.advance_width,
+        advance_h: metrics.advance_height,
+    }
 }
 
 /// 文字列を GlyphID の配列に変換する
@@ -194,8 +224,14 @@ pub fn analyze_text(font_obj: &Font, font_bytes: &[u8], text: &str) -> Vec<u16> 
         buffer.push_str(text);
 
         let glyph_buffer = rustybuzz::shape(&face, &[], buffer);
-        glyph_buffer.glyph_infos().iter().map(|info| info.glyph_id as u16).collect()
+        glyph_buffer
+            .glyph_infos()
+            .iter()
+            .map(|info| info.glyph_id as u16)
+            .collect()
     }
     #[cfg(not(feature = "enable_ligatures"))]
-    text.chars().map(|c| font_obj.lookup_glyph_index(c)).collect()
+    text.chars()
+        .map(|c| font_obj.lookup_glyph_index(c))
+        .collect()
 }

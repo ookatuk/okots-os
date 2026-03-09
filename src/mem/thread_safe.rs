@@ -61,7 +61,7 @@ pub unsafe fn init_gs(app_stack: *const u8, kernel_stack: *const u8) {
     });
 
     let ptr = Box::leak(gs);
-    unsafe { ptr.self_ptr = addr_of!(ptr).addr() as u64 };
+    ptr.self_ptr = (ptr as *mut Gs).addr() as u64;
 
     unsafe {
         cpu::utils::write_msr(

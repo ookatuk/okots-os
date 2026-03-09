@@ -13,7 +13,7 @@ impl InternalSlab {
         core::mem::offset_of!(Self, data)
     }
 
-    pub unsafe fn init_at(
+    pub const unsafe fn init_at(
         ptr: *mut u8,
         slot_size: u32,
         next: Option<NonNull<InternalSlab>>,

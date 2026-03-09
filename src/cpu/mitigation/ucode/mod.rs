@@ -64,7 +64,7 @@ pub fn get_micro_code(typ: CpuVendor) -> result::Result<(*const u8, RangePtr)> {
     Ok((patch_ptr, data))
 }
 
-pub fn find_intel_patch(slice: &[u8], sig: u32, pfs: u32) -> Option<*const IntelUcodeHeader> {
+pub const fn find_intel_patch(slice: &[u8], sig: u32, pfs: u32) -> Option<*const IntelUcodeHeader> {
     let mut offset = 0;
     while offset + size_of::<IntelUcodeHeader>() <= slice.len() {
         let header_ptr = unsafe { slice.as_ptr().add(offset) as *const IntelUcodeHeader };
@@ -87,8 +87,11 @@ pub fn find_intel_patch(slice: &[u8], sig: u32, pfs: u32) -> Option<*const Intel
     None
 }
 
-pub fn find_amd_patch(slice: &[u8], sig: u32) -> Option<*const AmdPatchHeader> {
-    let equiv_id = find_equiv_id(slice, sig)?;
+pub const fn find_amd_patch(slice: &[u8], sig: u32) -> Option<*const AmdPatchHeader> {
+    let equiv_id = match find_equiv_id(slice, sig) {
+        Some(equiv_id) => equiv_id,
+        None => return None,
+    };
 
     let mut offset = find_first_patch_offset(slice);
 
@@ -169,7 +172,7 @@ pub unsafe fn load_from_ptr(data: *const u8, typ: CpuVendor) -> result::Result<(
     Ok(())
 }
 
-fn find_equiv_id(slice: &[u8], sig: u32) -> Option<u16> {
+const fn find_equiv_id(slice: &[u8], sig: u32) -> Option<u16> {
     let table_size = unsafe { *(slice.as_ptr().add(8) as *const u32) } as usize;
 
     let entry_size = size_of::<AmdEquivTableEntry>();
@@ -177,16 +180,19 @@ fn find_equiv_id(slice: &[u8], sig: u32) -> Option<u16> {
 
     let table_ptr = unsafe { slice.as_ptr().add(12) as *const AmdEquivTableEntry };
 
-    for i in 0..num_entries {
+    let mut i = 0;
+    while i < num_entries {
         let entry = unsafe { &*table_ptr.add(i) };
         if entry.processor_rev_id == (sig as u16) {
             return Some(entry.equivalent_cpu_id);
         }
+
+        i += 1;
     }
     None
 }
 
-fn find_first_patch_offset(slice: &[u8]) -> usize {
+const fn find_first_patch_offset(slice: &[u8]) -> usize {
     let table_size = unsafe { *(slice.as_ptr().add(8) as *const u32) } as usize;
 
     12 + table_size
@@ -312,7 +318,7 @@ unsafe fn find_good_file(vendor_enum: CpuVendor) -> result::Result<RangePtr> {
                     ErrorType::InvalidData,
                     Some(format!("Cpu Vendor Name is Bad ({})", err)),
                 )
-                    .raise();
+                .raise();
             }
             let a = unsafe { a.unwrap_unchecked() };
 
@@ -328,11 +334,11 @@ unsafe fn find_good_file(vendor_enum: CpuVendor) -> result::Result<RangePtr> {
     };
 
     if target_path.is_none() {
-            return Error::new(
-                ErrorType::NotSupported,
-                Some("No matching files were found."),
-            )
-            .raise();
+        return Error::new(
+            ErrorType::NotSupported,
+            Some("No matching files were found."),
+        )
+        .raise();
     }
 
     let mut target_path = unsafe { target_path.unwrap_unchecked() };

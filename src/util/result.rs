@@ -24,9 +24,9 @@ pub enum ErrorType {
     NotAFile,
 }
 
-impl From<uefi::Error> for ErrorType {
+impl ErrorType {
     #[inline]
-    fn from(status: uefi::Error) -> Self {
+    const fn from_uefi(status: uefi::Error) -> Self {
         ErrorType::UefiError(status)
     }
 }
@@ -49,10 +49,14 @@ pub struct Error {
 
 impl Error {
     #[inline]
-    pub fn new(error_type: ErrorType, message: Option<&'static str>) -> Self {
+    pub const fn new(error_type: ErrorType, message: Option<&'static str>) -> Self {
+        let message = match message {
+            Some(s) => Some(Cow::Borrowed(s)),
+            None => None,
+        };
         Self {
             error_type,
-            message: message.map(Cow::Borrowed),
+            message,
         }
     }
 
@@ -65,18 +69,21 @@ impl Error {
     }
 
     #[inline]
-    pub fn raise<T>(self) -> Result<T> {
+    pub const fn raise<T>(self) -> Result<T> {
         Err(self)
     }
 
     #[inline]
-    pub fn from_uefi(status: uefi::Error, desc: Option<&'static str>) -> Self {
-        Error::new(ErrorType::from(status), desc)
+    pub const fn from_uefi(status: uefi::Error, desc: Option<&'static str>) -> Self {
+        Error::new(ErrorType::from_uefi(status), desc)
     }
 
     #[inline]
     #[deprecated(note = "`try_raise` is easier.")]
-    pub fn try_from_uefi(status: uefi::Result, desc: Option<&'static str>) -> core::result::Result<Self, ()> {
+    pub fn try_from_uefi(
+        status: uefi::Result,
+        desc: Option<&'static str>,
+    ) -> core::result::Result<Self, ()> {
         let mut error_type = Error::try_from(status)?;
 
         error_type.message = desc.map(Cow::Borrowed);
@@ -87,9 +94,9 @@ impl Error {
     #[inline]
     pub fn try_raise<T>(status: uefi::Result<T>, desc: Option<&'static str>) -> Result<T> {
         if status.is_ok() {
-            return Ok(unsafe{status.unwrap_unchecked()});  // 大丈夫なのは確定
+            return Ok(unsafe { status.unwrap_unchecked() }); // 大丈夫なのは確定
         }
-        let error = unsafe{status.unwrap_err_unchecked()};
+        let error = unsafe { status.unwrap_err_unchecked() };
         Self::from_uefi(error, desc).raise()
     }
 
@@ -112,9 +119,11 @@ impl<T: core::fmt::Debug> TryFrom<uefi::Result<T>> for Error {
 
     #[inline]
     fn try_from(value: uefi::Result<T>) -> core::result::Result<Self, Self::Error> {
-        if value.is_ok() { return Err(()); }
+        if value.is_ok() {
+            return Err(());
+        }
 
-        Ok(unsafe{Self::from(value.unwrap_err_unchecked())})
+        Ok(unsafe { Self::from(value.unwrap_err_unchecked()) })
     }
 }
 

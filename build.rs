@@ -1,10 +1,56 @@
+use sha2::{Digest, Sha256};
 use std::env;
+use std::fs::File;
+use std::io::{self, Read};
 use std::path::PathBuf;
 use std::process::Command;
+use walkdir::WalkDir;
+
+fn calculate_dir_hash(dir_path: &str) -> io::Result<String> {
+    let mut hasher = Sha256::new();
+
+    let mut entries: Vec<_> = WalkDir::new(dir_path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .collect();
+
+    entries.sort_by(|a, b| a.path().cmp(b.path()));
+
+    // 2. 各ファイルの内容をハッシュ計算機に流し込む
+    for entry in entries {
+        let mut file = File::open(entry.path())?;
+        let mut buffer = [0; 8192];
+
+        hasher.update(entry.path().to_string_lossy().as_bytes());
+
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+    }
+
+    let result = hasher.finalize();
+    let full_hash = hex::encode(result);
+
+    let short_hash = &full_hash[..7];
+
+    Ok(short_hash.to_string())
+}
 
 fn main() {
+    println!("cargo:rerun-if-changed=log_viewer/src");
+    println!("cargo:rerun-if-changed=log_viewer/Cargo.lock");
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=src");
+
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let external_dir = PathBuf::from(&manifest_dir).join("log_viewer");
+
+    let src_dir = PathBuf::from(&manifest_dir).join("src");
 
     let host_target = env::var("HOST").expect("HOST env var not found");
     let binary_name = "ookatuks_os_log_viewer";
@@ -69,6 +115,26 @@ fn main() {
         dest_path.display()
     );
 
-    println!("cargo:rerun-if-changed=log_viewer/src");
-    println!("cargo:rerun-if-changed=log_viewer/Cargo.lock");
+    let hash = Command::new("git")
+        .args(&["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_else(|| "unknown".into());
+    let dir_hash = calculate_dir_hash(src_dir.to_str().unwrap()).unwrap();
+
+    println!("cargo:rustc-env=OS_BUILD={}", hash);
+
+    let mut profile = std::env::var("PROFILE").unwrap();
+
+    if profile == "debug" {
+        profile = "dev".to_string()
+    }
+
+    println!("cargo:rustc-env=OS_PROFILE={}!{}", profile.trim(), dir_hash);
+
+    let cycle = std::env::var("OS_CYCLE").unwrap_or_else(|_| "dev".into());
+    if cycle != profile {
+        println!("cargo:warning=profile not match.");
+    }
 }

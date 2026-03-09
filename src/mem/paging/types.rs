@@ -72,47 +72,52 @@ impl PageEntryFlags {
     pub const fn to_pml4f(&self) -> PML4Flags {
         PML4Flags::from_bits_truncate(self.apply_to_raw(0))
     }
-    pub fn to_pdptf(&self) -> PDPTFlags {
-        let mut f = PDPTFlags::from_bits_truncate(self.apply_to_raw(0));
+    pub const fn to_pdptf(&self) -> PDPTFlags {
+        let mut bits = self.apply_to_raw(0);
+
         if self.contains(Self::PAT) {
-            f |= PDPTFlags::PAT;
+            bits |= PDPTFlags::PAT.bits();
         }
         if self.contains(Self::DIRTY) {
-            f |= PDPTFlags::D;
+            bits |= PDPTFlags::D.bits();
         }
         if self.contains(Self::GLOBAL) {
-            f |= PDPTFlags::G;
+            bits |= PDPTFlags::G.bits();
         }
         if self.contains(Self::HUGE) {
-            f |= PDPTFlags::PS;
+            bits |= PDPTFlags::PS.bits();
         }
-        f
+
+        PDPTFlags::from_bits_truncate(bits)
     }
-    pub fn to_pdf(&self) -> PDFlags {
-        let mut f = PDFlags::from_bits_truncate(self.apply_to_raw(0));
+
+    pub const fn to_pdf(&self) -> PDFlags {
+        let mut f = self.apply_to_raw(0);
         if self.contains(Self::PAT) {
-            f |= PDFlags::PAT;
+            f |= PDFlags::PAT.bits();
         }
         if self.contains(Self::DIRTY) {
-            f |= PDFlags::D;
+            f |= PDFlags::D.bits();
         }
         if self.contains(Self::GLOBAL) {
-            f |= PDFlags::G;
+            f |= PDFlags::G.bits();
         }
         if self.contains(Self::HUGE) {
-            f |= PDFlags::PS;
+            f |= PDFlags::PS.bits();
         }
-        f
+
+        PDFlags::from_bits_truncate(f)
     }
-    pub fn to_ptf(&self) -> PTFlags {
-        let mut f = PTFlags::from_bits_truncate(self.apply_to_raw(0));
+    pub const fn to_ptf(&self) -> PTFlags {
+        let mut f = self.apply_to_raw(0);
         if self.contains(Self::DIRTY) {
-            f |= PTFlags::D;
+            f |= PTFlags::D.bits();
         }
         if self.contains(Self::GLOBAL) {
-            f |= PTFlags::G;
+            f |= PTFlags::G.bits();
         }
-        f
+
+        PTFlags::from_bits_truncate(f)
     }
 }
 
@@ -127,15 +132,14 @@ pub enum PageLevel {
 }
 
 impl PageLevel {
-    pub fn get_index(&self, vaddr: VirtAddr) -> usize {
+    pub const fn get_index(&self, vaddr: VirtAddr) -> usize {
         let shift = (*self as u8) * 9 + 12;
         ((vaddr.as_u64() >> shift) & 0x1ff) as usize
     }
-    pub fn down(&self) -> Option<PageLevel> {
-        if *self == PageLevel::Pt {
-            None
-        } else {
-            Self::from_u8(*self as u8 - 1)
+    pub const fn down(&self) -> Option<PageLevel> {
+        match self {
+            PageLevel::Pt => None,
+            _ => Some(unsafe { core::mem::transmute::<u8, PageLevel>(*self as u8 - 1) }),
         }
     }
 }
