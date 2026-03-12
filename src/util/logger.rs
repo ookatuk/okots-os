@@ -191,7 +191,7 @@ impl OsLog {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn custom_internal(
     level: &'static str,
     by: &'static str,

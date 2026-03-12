@@ -356,8 +356,8 @@ impl RawShell for KernelShell {
         }
 
         {
-            me.engine.build_type::<GsMainData>();
-            me.engine.build_type::<Gs>();
+            me.normal.normal.engine.build_type::<GsMainData>();
+            me.normal.normal.engine.build_type::<Gs>();
 
             let mut gs = Module::new();
             let prefix = "kernel::gs";

@@ -15,15 +15,17 @@ pub struct Tsc {
 
 impl Tsc {
     pub const fn new() -> Self {
-        Tsc { clock_in_100ms: None }
+        Tsc {
+            clock_in_100ms: None,
+        }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn now_clock(&self) -> u64 {
         Self::now_clock_()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn now_clock_() -> u64 {
         unsafe { core::arch::x86_64::_rdtsc() }
     }
@@ -45,10 +47,7 @@ impl Tsc {
             self.clock_in_100ms = Some(clock);
             Ok(())
         } else {
-            Error::new(
-                ErrorType::DeviceError,
-                Some("100ms clock is zero")
-            ).raise()
+            Error::new(ErrorType::DeviceError, Some("100ms clock is zero")).raise()
         }
     }
 
@@ -64,3 +63,4 @@ impl Tsc {
         }
     }
 }
+

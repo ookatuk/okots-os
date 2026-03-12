@@ -3,7 +3,7 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
-use core::any::{type_name, Any, TypeId};
+use core::any::{Any, TypeId, type_name};
 use core::fmt::{Debug, Display, Formatter};
 
 pub type Result<Output = ()> = core::result::Result<Output, Error>;
@@ -28,6 +28,8 @@ pub enum ErrorType {
     AcpiError(acpi::AcpiError),
     IndexMax,
     AlreadyUsed,
+    AlreadyInitialized,
+    NotInitialized,
 }
 
 impl ErrorType {
@@ -48,7 +50,6 @@ impl Display for ErrorType {
         f.write_fmt(format_args!("{:?}", self))
     }
 }
-
 
 unsafe impl Send for ErrorType {}
 unsafe impl Sync for ErrorType {}
@@ -95,31 +96,25 @@ impl Error {
         Error::new(ErrorType::from_acpi(status), desc)
     }
 
-    pub fn try_raise<T, E: 'static + Debug>(status: core::result::Result<T, E>, desc: Option<&'static str>) -> Result<T> {
+    pub fn try_raise<T, E: 'static + Debug>(
+        status: core::result::Result<T, E>,
+        desc: Option<&'static str>,
+    ) -> Result<T> {
         match status {
             Ok(val) => Ok(val),
             Err(error) => {
                 let any_err = &error as &dyn Any;
 
                 if let Some(acpi_err) = any_err.downcast_ref::<acpi::AcpiError>() {
-
                     Self::from_acpi(acpi_err.clone(), desc).raise()
-
                 } else if let Some(uefi_err) = any_err.downcast_ref::<uefi::Error>() {
-
                     Self::from_uefi(uefi_err.clone(), desc).raise()
-
                 } else if let Some(me) = any_err.downcast_ref::<Error>() {
-
                     me.clone().raise()
-
                 } else {
                     let error: Arc<dyn Debug> = Arc::new(error);
 
-                    Err(Self::new(
-                        ErrorType::Other(error),
-                        desc
-                    ))
+                    Err(Self::new(ErrorType::Other(error), desc))
                 }
             }
         }
@@ -147,7 +142,7 @@ impl From<Error> for Box<rhai::EvalAltResult> {
     fn from(err: Error) -> Self {
         Box::new(rhai::EvalAltResult::ErrorSystem(
             format!("{}", err),
-            Box::new(err)
+            Box::new(err),
         ))
     }
 }
@@ -157,3 +152,4 @@ unsafe impl Send for Error {}
 unsafe impl Sync for Error {}
 
 impl core_error::Error for Error {}
+

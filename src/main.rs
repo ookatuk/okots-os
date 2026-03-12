@@ -5,12 +5,13 @@
 extern crate alloc;
 
 const VERSION_RAW: &str = "1.0.0";
+const OS_CYCLE: &str = "dev";
 
 const MICRO_VER: u32 = 0;
 
 const VERSION: &str = formatcp!(
     "{}-v2-{VERSION_RAW}_{MICRO_VER}-build-{}.{}",
-    env!("OS_CYCLE"),
+    OS_CYCLE,
     env!("OS_PROFILE"),
     env!("OS_BUILD"),
 );
