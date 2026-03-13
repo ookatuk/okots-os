@@ -1,7 +1,7 @@
 ## features
-* loading screen in **before** `exit_boot_services`
-* before exit boot services and later HDR(In UEFI mode, need GOP Bitmask.)
-* **True Type Font(ttf)** and **ligatures**  support
+* loading screen **before** `exit_boot_services`
+* HDR support (both pre/post exit_boot_services)
+* **True Type Font(ttf)** support
 ###  Enable/disable features during build
 
 #### Runtime checks
@@ -30,35 +30,59 @@
 > **WSL2 is highly recommended** for a stable build environment.
 
 1. install `cargo-make`
-> run `cargo install cargo-make`
+> run 
+> ```
+> cargo install cargo-make
+> ```
 
-2. run `cargo make init_project`
-> or `./init.(sh/bat)`
+2. init project
+> ```
+> cargo make init_project
+> ```
+> or 
+> ```
+> ./init.(sh/bat)
+> ```
 
 > [!TIP]
 > `scripts/internal_init_script` is a common initialization script for Linux builds, not for the entire project. 
 
 * if you need iso,
 
-> run `cargo make iso`
+> run 
+> ```
+> cargo make iso
+> ```
 
 * if you need efi,
 
-> run `cargo make build`\
+> run 
+> ```
+> cargo make build
+> ```
 > or
-> run `cargo build`
+> run 
+> ```
+> cargo build
+> ```
 
 > [!WARNING]
 > **Microcode Notice**: 
 > Microcode is prepared during the `cargo make init_project` phase, but it is **not** automatically updated or downloaded during runtime by the OS. 
 >
 > If you need to manually refresh or fetch the latest microcode after the initial setup, use the following task:
-> ```bash
+> ```
 > cargo make update_microcode
 > ```
 
 > [!TIP]
-> if you need run and use Official Log Viewer,(in native Linux / GUI support version WSL)
+> If you want to run the Official Log Viewer (in native Linux / GUI support version WSL)
 >
-> run `cargo make run`
-> or run `cargo run`
+> run 
+> ```
+> cargo make run
+> ```
+> or run 
+> ```
+> cargo run
+> ```
