@@ -2,14 +2,12 @@
 * loading screen in **before** `exit_boot_services`
 * before exit boot services and later HDR(In UEFI mode, need GOP Bitmask.)
 * **True Type Font(ttf)** and **ligatures**  support
-* Enable/disable features during build(The checkmark is the default)
+###  Enable/disable features during build
 
-> [x] boot option(memory check, boot, shutdown)\
-> [x] build in full memory check(addr, 0x00, 0xff, 0x55,0xAA)\
-> [ ] ligatures (powered by rustybizz. available both before and after exit_boot_services)\
-> [x] **UART and more!**(Look at cargo.toml)
-### Runtime Checks
-> (Essentials [x], Normal [x], Overprotective [ ])
+#### Runtime checks
+* [x] Essentials
+* [x] Normal
+* [x] Overprotective
 * [x] **Boot options**: Memory check, boot, and shutdown.
 * [x] **Full memory check**: Built-in check (patterns: addr, 0x00, 0xff, 0x55, 0xAA).
 * [ ] **Overprotective**: Built-in but disabled by default.
