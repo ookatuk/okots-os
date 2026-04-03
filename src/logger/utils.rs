@@ -16,7 +16,7 @@ pub fn _custom(
     custom_internal(level, by, tag, text, location);
 }
 
-pub(crate) struct UartTmp<'a>(pub &'a mut SerialPort);
+pub(super) struct UartTmp<'a>(pub &'a mut SerialPort);
 
 impl Writer for UartTmp<'_> {
     fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {

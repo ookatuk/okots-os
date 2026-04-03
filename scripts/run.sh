@@ -45,12 +45,16 @@ qemu-system-x86_64 \
   -machine q35 \
   -drive if=pflash,format=raw,readonly=on,file="$CODE" \
   -drive if=pflash,format=raw,file="$VARS_TMP" \
-  -drive file=fat:rw:"$WORKSPACE_ROOT/esp",format=raw \
+  \
   -serial pipe:"$WORKSPACE_ROOT/serial_pipe" \
   -device virtio-gpu-pci \
   -display gtk,zoom-to-fit=on \
   -rtc base=localtime,clock=host \
   -global kvm-pit.lost_tick_policy=delay \
+  \
+  -drive file=fat:rw:"$WORKSPACE_ROOT/esp",format=raw,if=none,id=virtio_disk \
+  -device virtio-blk-pci,drive=virtio_disk \
+  \
   -no-reboot \
   -no-shutdown
 

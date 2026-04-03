@@ -126,5 +126,27 @@ impl CustomType for VersionInfo<'static> {
         builder.with_get("developer", |sel: &mut Self| sel.developer.clone());
         builder.with_get("build", |sel: &mut Self| sel.build.clone());
         builder.with_get("hash", |sel: &mut Self| sel.hash.clone());
+
+        builder.with_get_set(
+            "additional",
+            |sel: &mut Self| {
+                let mut map = rhai::Map::new();
+                for (k, v) in &sel.additional {
+                    map.insert(k.to_string().into(), v.to_string().into());
+                }
+                map
+            },
+            |sel: &mut Self, value: rhai::Map| {
+                sel.additional = value
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            Cow::Owned(k.to_string()),
+                            Cow::Owned(v.to_string()),
+                        )
+                    })
+                    .collect();
+            },
+        );
     }
 }

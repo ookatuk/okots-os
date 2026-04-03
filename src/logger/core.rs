@@ -9,26 +9,34 @@ use core::panic::Location;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::{Lazy, RwLock};
 use x86_64::instructions::interrupts;
-
+use crate::thread_local::read_gs;
+use crate::timer::Timer;
+use crate::timer::tsc::TSC;
 use super::types::OsLog;
 use super::utils::UartTmp;
 
 pub static LOG_CAPACITY: AtomicUsize = AtomicUsize::new(5000);
 
-pub(crate) static LOG_BUF: Lazy<RwLock<VecDeque<Arc<OsLog>>>> =
+pub(super) static LOG_BUF: Lazy<RwLock<VecDeque<Arc<OsLog>>>> =
     Lazy::new(|| RwLock::new(VecDeque::with_capacity(LOG_CAPACITY.load(Ordering::SeqCst))));
 
-pub(crate) static LOG_HEAD_ID: AtomicUsize = AtomicUsize::new(0);
+pub(super) static LOG_HEAD_ID: AtomicUsize = AtomicUsize::new(0);
 
 
-pub(crate) fn custom_internal(
+pub(super) fn custom_internal(
     level: &'static str,
     by: &'static str,
     tag: &'static str,
     text: core::fmt::Arguments,
     loc: &'static Location,
 ) {
-    let time = 0;
+    let mut time = 0;
+    if let Some(gs) = read_gs() {
+        if gs.tsc_init {
+            time = TSC.get_time().as_secs();
+        }
+    }
+    let cpu_acpi_id = crate::cpu::utils::who_am_i().unwrap_or(u32::MAX);
 
     let data = OsLog {
         time,
@@ -41,7 +49,7 @@ pub(crate) fn custom_internal(
         line: loc.line(),
         column: loc.column(),
 
-        cpu_acpi_id: 0,
+        cpu_acpi_id,
     };
 
     add_log(&data);

@@ -1,4 +1,4 @@
-use alloc::alloc::alloc;
+use alloc::alloc::{alloc, dealloc};
 use core::alloc::Layout;
 use core::ptr;
 use uefi::boot;
@@ -42,6 +42,15 @@ impl MyMemoryMapOwned {
     }
 }
 
+// ExitBootServices後はUEFIのアロケータが使えないため、
+// Dropでdeallocを呼ぶとAPやBSPがクラッシュする原因になります。
+// ここではメモリを保持し続けるために中身を空にします。
+impl Drop for MyMemoryMapOwned {
+    fn drop(&mut self) {
+        // unsafe { dealloc(self.ptr, self.layout) }; // 削除
+    }
+}
+
 pub unsafe fn exit_boot_services_with_talc() -> MyMemoryMapOwned {
     let bt_ptr = unsafe { system_table_raw().unwrap().read().boot_services };
     let bt = unsafe { bt_ptr.as_ref() }.expect("Failed to get BS");
@@ -72,10 +81,19 @@ pub unsafe fn exit_boot_services_with_talc() -> MyMemoryMapOwned {
         panic!("Out of memory for memory map");
     }
 
+    let mut map = MyMemoryMapOwned {
+        ptr: buffer_ptr,
+        layout,
+        total_size: buffer_capacity,
+        desc_size,
+    };
+
     for _ in 0..3 {
+        // GetMemoryMapに現在のバッファ容量を渡す
+        let mut actual_map_size = buffer_capacity;
         let status = unsafe {
             (bt.get_memory_map)(
-                &mut buffer_capacity,
+                &mut actual_map_size,
                 buffer_ptr as *mut _,
                 &mut map_key,
                 &mut desc_size,
@@ -88,12 +106,9 @@ pub unsafe fn exit_boot_services_with_talc() -> MyMemoryMapOwned {
             let exit_status = unsafe { (bt.exit_boot_services)(image_handle.as_ptr(), map_key) };
 
             if exit_status == Status::SUCCESS {
-                return MyMemoryMapOwned {
-                    ptr: buffer_ptr,
-                    layout,
-                    total_size: buffer_capacity,
-                    desc_size,
-                };
+                // 実際に書き込まれたサイズを記録（これを行わないとiterがゴミを指す）
+                map.total_size = actual_map_size;
+                return map;
             }
         }
     }

@@ -4,7 +4,6 @@ use paste::paste;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimdLevel { None, Sse4, Avx2, Avx512 }
 
-// --- 基礎マクロ: 算術 ---
 macro_rules! def_arith {
     ($op:ident, $inner:ty, $s:ty, $name:ident, $suffix:literal, $target:literal, $lanes:expr) => {
         paste! {
@@ -31,7 +30,6 @@ macro_rules! def_arith {
     (@simd rem, $va:expr, $vb:expr) => { $va % $vb };
 }
 
-// --- 基礎マクロ: 論理 ---
 macro_rules! def_logic {
     ($op:ident, $inner:ty, $s:ty, $name:ident, $suffix:literal, $target:literal, $lanes:expr, $sym:tt) => {
         paste! {
@@ -51,7 +49,6 @@ macro_rules! def_logic {
     };
 }
 
-// --- 基礎マクロ: 単項 ---
 macro_rules! def_not {
     ($inner:ty, $s:ty, $name:ident, $suffix:literal, $target:literal, $lanes:expr) => {
         paste! {
@@ -70,7 +67,6 @@ macro_rules! def_not {
     };
 }
 
-// --- 基礎マクロ: シフト ---
 macro_rules! def_shift {
     ($op:ident, $inner:ty, $s:ty, $name:ident, $suffix:literal, $target:literal, $lanes:expr) => {
         paste! {
@@ -97,12 +93,10 @@ macro_rules! def_shift {
     (@simd rotr, $v:expr, $vn:expr, $bits:expr) => { ($v >> $vn) | ($v << ($bits - $vn)) };
 }
 
-// --- 一括展開 ---
 macro_rules! setup_simd_types {
     { $( $name:ident => ($inner:ty, $kind:ident, $s128:ty, $s256:ty, $s512:ty) ),* $(,)? } => {
         $(
             paste! {
-                // 算術 5種
                 def_arith!(add, $inner, $s128, $name, 128, "sse4.1", (128/8/core::mem::size_of::<$inner>()));
                 def_arith!(add, $inner, $s256, $name, 256, "avx2",   (256/8/core::mem::size_of::<$inner>()));
                 def_arith!(add, $inner, $s512, $name, 512, "avx512f", (512/8/core::mem::size_of::<$inner>()));
@@ -173,10 +167,8 @@ macro_rules! setup_simd_types {
         )*
     };
 
-    // 整数のみの演算
     (@int_only int, $name:ident, $inner:ty, $s128:ty, $s256:ty, $s512:ty) => {
         paste! {
-            // Logic 3種 + Not
             def_logic!(bitand, $inner, $s128, $name, 128, "sse4.1", (128/8/core::mem::size_of::<$inner>()), &);
             def_logic!(bitand, $inner, $s256, $name, 256, "avx2",   (256/8/core::mem::size_of::<$inner>()), &);
             def_logic!(bitand, $inner, $s512, $name, 512, "avx512f", (512/8/core::mem::size_of::<$inner>()), &);
@@ -229,7 +221,6 @@ macro_rules! setup_simd_types {
                 }
             }
 
-            // Shift/Rotate 4種
             def_shift!(shl, $inner, $s128, $name, 128, "sse4.1", (128/8/core::mem::size_of::<$inner>()));
             def_shift!(shl, $inner, $s256, $name, 256, "avx2",   (256/8/core::mem::size_of::<$inner>()));
             def_shift!(shl, $inner, $s512, $name, 512, "avx512f", (512/8/core::mem::size_of::<$inner>()));
@@ -285,7 +276,6 @@ macro_rules! setup_simd_types {
     };
     (@int_only float, $($any:tt)*) => {};
 
-    // スカラーフォールバックの詳細定義
     (@scalar_ int, add, $a:ident, $b:ident, $i:ident) => { $a[$i] = $a[$i].wrapping_add($b[$i]) };
     (@scalar_ int, sub, $a:ident, $b:ident, $i:ident) => { $a[$i] = $a[$i].wrapping_sub($b[$i]) };
     (@scalar_ int, mul, $a:ident, $b:ident, $i:ident) => { $a[$i] = $a[$i].wrapping_mul($b[$i]) };
@@ -298,7 +288,6 @@ macro_rules! setup_simd_types {
     (@scalar_ float, rem, $a:ident, $b:ident, $i:ident) => { $a[$i] %= $b[$i] };
 }
 
-// --- 最終展開 ---
 setup_simd_types! {
     SimdU64 => (u64, int, u64x2, u64x4, u64x8),
     SimdU32 => (u32, int, u32x4, u32x8, u32x16),

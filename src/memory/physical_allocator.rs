@@ -2,6 +2,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use spin::Once;
 use spinning_top::RawSpinlock;
 use x86_64::instructions::interrupts::without_interrupts;
+use crate::POSITION_VALUE;
 use crate::util_types::CanRangeData;
 
 pub struct OsPhysicalAllocator {
@@ -20,13 +21,15 @@ impl OsPhysicalAllocator {
         }
     }
 
-    pub unsafe fn add_target_to_os_alloc<T: CanRangeData>(&self, data: crate::util_types::MemRangeData<T>) {
+    pub unsafe fn add_target_to_os_alloc(&self, data: crate::util_types::MemRangeData<usize>) {
+        let ptr = data.start() as *mut u8;
+        let len = data.len();
         without_interrupts(|| { unsafe{
             let mut lock = self.os_allocator.lock();
 
             lock.claim(
-                data.start().to_usize().unwrap() as *mut _,
-                data.len().to_usize().unwrap(),
+                ptr,
+                len,
             );
         }});
     }

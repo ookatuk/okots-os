@@ -1,3 +1,4 @@
+use alloc::alloc::dealloc;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::bitflags;
@@ -11,10 +12,11 @@ use x86::bits64::paging::{
     PAddr, PDEntry, PDFlags, PDPTEntry, PDPTFlags, PML4Entry, PML4Flags, PML5Entry, PML5Flags,
     PTEntry, PTFlags,
 };
+use x86::tlb::flush_all;
 use x86_64::registers::control::{Cr3, Cr3Flags, Cr4, Cr4Flags};
 use x86_64::structures::paging::{PageTable, PageTableFlags, PhysFrame};
 use x86_64::{PhysAddr, VirtAddr};
-use crate::result;
+use crate::{deb, result};
 use crate::result::{Error, ErrorType};
 use crate::util_types::MemRangeData;
 
@@ -155,6 +157,17 @@ pub struct TopPageTable {
     pub memory_mapping: (Vec<MemRangeData<usize>>, Vec<PageEntryFlags>),
 }
 
+impl Default for TopPageTable {
+    fn default() -> Self {
+        Self {
+            phys: PhysAddr::zero(),
+            virt: VirtAddr::zero(),
+            level: PageLevel::Pt,
+            memory_mapping: (Vec::new(), Vec::new()),
+        }
+    }
+}
+
 impl CustomType for TopPageTable {
     fn build(mut builder: rhai::TypeBuilder<Self>) {
         builder.with_set("set_addr", |me: &mut Self, value: i64| {
@@ -167,7 +180,7 @@ impl CustomType for TopPageTable {
 
 impl TopPageTable {
     pub fn ptr(&self) -> &'static mut PageTable {
-        unsafe { &mut *(self.virt.as_mut_ptr() as *mut PageTable) }
+        unsafe { &mut *(self.virt.as_mut_ptr()) }
     }
 }
 
@@ -215,18 +228,19 @@ pub fn create_page_table(
         phys,
         virt: VirtAddr::new(phys.as_u64() + PHY_OFFSET as u64),
         level: target,
-        memory_mapping: (vec![], vec![]),
+        memory_mapping: (map_list.to_vec(), flags.to_vec()),
     })
 }
 
 #[inline]
-pub fn set_current(table: TopPageTable) {
+pub fn set_current(table: &TopPageTable) {
     unsafe{Cr3::write(
         PhysFrame::from_start_address(
             table.phys
         ).unwrap(),
         Cr3Flags::empty()
     )};
+    unsafe{flush_all()};
 }
 
 fn create_recursive(
@@ -471,4 +485,29 @@ pub fn get_addr(addr: VirtAddr) -> result::Result<PhysAddr> {
         current_table_ptr = (entry.addr().as_u64() + PHY_OFFSET as u64) as *const PageTable;
     }
     Error::new(ErrorType::NotFound, None).raise()
+}
+
+pub unsafe fn dealloc_all(map: TopPageTable) {
+    let top = map.ptr();
+    let level = map.level;
+
+    unsafe{dealloc_recursive(top, level)};
+}
+
+unsafe fn dealloc_recursive(target: &mut PageTable, level: PageLevel) {
+    if level != PageLevel::Pt {
+        for i in target.iter_mut() {
+            if !i.flags().contains(PageTableFlags::PRESENT) { continue; }
+
+            if !i.flags().contains(PageTableFlags::HUGE_PAGE) {
+                unsafe{dealloc_recursive(unsafe { &mut *(unsafe { i.addr().as_u64() + PHY_OFFSET as u64 } as *mut PageTable) }, level.down().unwrap())};
+            }
+        }
+    }
+    unsafe{
+        dealloc(
+            target as *mut PageTable as *mut u8,
+            Layout::from_size_align_unchecked(4096, 4096)
+        )
+    }
 }
