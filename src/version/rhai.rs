@@ -1,18 +1,17 @@
-use alloc::borrow::Cow;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::hint::unlikely;
 use rhai::{CustomType, TypeBuilder};
 use crate::version::types::{BuildInfo, BuilderInfo, DeveloperInfo, GitInfo, HashInfo, OptInfo, HashVariant, VersionInfo};
 
-impl CustomType for HashInfo<'static> {
+impl CustomType for HashInfo {
     fn build(mut builder: TypeBuilder<Self>) {
         builder.with_get("dir_hash", |sel: &mut Self| sel.dir_hash.clone());
         builder.with_get("git_hash", |sel: &mut Self| sel.git_hash.clone());
     }
 }
 
-impl CustomType for HashVariant<'static> {
+impl CustomType for HashVariant {
     fn build(mut builder: TypeBuilder<Self>) {
         builder.with_get("hash", |sel: &mut Self| {
             sel.hash()
@@ -24,29 +23,29 @@ impl CustomType for HashVariant<'static> {
     }
 }
 
-impl CustomType for DeveloperInfo<'static> {
+impl CustomType for DeveloperInfo {
     fn build(mut builder: TypeBuilder<Self>) {
-        builder.with_get_set("developer", |sel: &mut Self| sel.developer.to_string(), |sel: &mut Self, value| sel.developer = Cow::Owned(value));
+        builder.with_get_set("developer", |sel: &mut Self| sel.developer.to_string(), |sel: &mut Self, value| sel.developer = value);
     }
 }
 
-impl CustomType for BuilderInfo<'static> {
+impl CustomType for BuilderInfo {
     fn build(mut builder: TypeBuilder<Self>) {
-        builder.with_get_set("name", |sel: &mut Self| sel.name.to_string(), |sel: &mut Self, value| sel.name = Cow::Owned(value));
-        builder.with_get_set("info", |sel: &mut Self| sel.info.to_string(), |sel: &mut Self, value| sel.info = Cow::Owned(value));
-        builder.with_get_set("version", |sel: &mut Self| sel.version.to_string(), |sel: &mut Self, value| sel.version = Cow::Owned(value));
+        builder.with_get_set("name", |sel: &mut Self| sel.name.to_string(), |sel: &mut Self, value| sel.name = value);
+        builder.with_get_set("info", |sel: &mut Self| sel.info.to_string(), |sel: &mut Self, value| sel.info = value);
+        builder.with_get_set("version", |sel: &mut Self| sel.version.to_string(), |sel: &mut Self, value| sel.version = value);
     }
 }
 
-impl CustomType for GitInfo<'static> {
+impl CustomType for GitInfo {
     fn build(mut builder: TypeBuilder<Self>) {
-        builder.with_get_set("url", |sel: &mut Self| sel.url.to_string(), |sel: &mut Self, value| sel.url = Cow::Owned(value));
-        builder.with_get_set("branch", |sel: &mut Self| sel.branch.to_string(), |sel: &mut Self, value| sel.branch = Cow::Owned(value));
+        builder.with_get_set("url", |sel: &mut Self| sel.url.to_string(), |sel: &mut Self, value| sel.url = value);
+        builder.with_get_set("branch", |sel: &mut Self| sel.branch.to_string(), |sel: &mut Self, value| sel.branch = value);
     }
 }
 
 
-impl CustomType for OptInfo<'static> {
+impl CustomType for OptInfo {
     fn build(mut builder: TypeBuilder<Self>) {
         builder.with_get_set("opt",
                              |sel: &mut Self| {
@@ -57,7 +56,7 @@ impl CustomType for OptInfo<'static> {
 
                              |sel: &mut Self, value: Vec<rhai::Dynamic>| {
                                  sel.opt = value.into_iter()
-                                     .map(|d| Cow::Owned(d.to_string()))
+                                     .map(|d| d.to_string())
                                      .collect::<Vec<_>>().into();
                              }
         );
@@ -70,7 +69,7 @@ impl CustomType for OptInfo<'static> {
     }
 }
 
-impl CustomType for BuildInfo<'static> {
+impl CustomType for BuildInfo {
     fn build(mut builder: TypeBuilder<Self>) {
         builder.with_get_set("features",
                              |sel: &mut Self| {
@@ -80,16 +79,13 @@ impl CustomType for BuildInfo<'static> {
                              },
 
                              |sel: &mut Self, value: Vec<String>| {
-                                 sel.features = value.into_iter()
-                                     .map(Cow::Owned)
-                                     .collect::<Vec<Cow<'static, str>>>()
-                                     .into();
+                                 sel.features = value;
                              }
         );
 
         builder.with_get_set("profile",
                              |sel: &mut Self| {
-                                 let data = sel.profile.as_ref();
+                                 let data = sel.profile.as_str();
                                  if unlikely(data == "") {
                                      None
                                  } else {
@@ -98,27 +94,27 @@ impl CustomType for BuildInfo<'static> {
                              },
 
                              |sel: &mut Self, value: Option<String>| {
-                                 sel.profile = value.map(Cow::Owned).unwrap_or(Cow::Borrowed(""));
+                                 sel.profile = value.unwrap_or_default();
                              }
         );
 
         builder.with_get_set("cycle",
 
                              |sel: &mut Self| sel.cycle.to_string(),
-                             |sel: &mut Self, value: String| sel.cycle = Cow::Owned(value)
+                             |sel: &mut Self, value: String| sel.cycle = value
         );
         builder.with_get_set("version",
                              |sel: &mut Self| sel.version.to_string(),
-                             |sel: &mut Self, value: String| sel.version = Cow::Owned(value)
+                             |sel: &mut Self, value: String| sel.version = value
         );
         builder.with_get_set("name",
                              |sel: &mut Self| sel.name.to_string(),
-                             |sel: &mut Self, value: String| sel.name = Cow::Owned(value)
+                             |sel: &mut Self, value: String| sel.name = value
         );
     }
 }
 
-impl CustomType for VersionInfo<'static> {
+impl CustomType for VersionInfo {
     fn build(mut builder: TypeBuilder<Self>) {
         builder.with_get("git", |sel: &mut Self| sel.git.clone());
         builder.with_get("builder", |sel: &mut Self| sel.builder.clone());
@@ -141,8 +137,8 @@ impl CustomType for VersionInfo<'static> {
                     .into_iter()
                     .map(|(k, v)| {
                         (
-                            Cow::Owned(k.to_string()),
-                            Cow::Owned(v.to_string()),
+                            k.to_string(),
+                            v.to_string(),
                         )
                     })
                     .collect();

@@ -1,4 +1,5 @@
-# (testing) os
+# okotu (ookatu owned test os)
+> An OS with many dependencies, seemingly meticulously designed but bit really.
 
 > [!IMPORTANT]
 > It's currently being rebuilt.

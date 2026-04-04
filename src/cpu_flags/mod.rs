@@ -1,4 +1,5 @@
 #![allow(non_upper_case_globals)]
+#![allow(unused_macros)]
 
 use core::arch::x86_64::{CpuidResult, __cpuid, __cpuid_count};
 use spin::Lazy;
@@ -6,6 +7,7 @@ use x86_64::registers::control::Cr4;
 use x86_64::registers::control::Cr4Flags;
 use local_macros::define_cpu_flags;
 
+#[allow(unused)]
 static CPUID_1: Lazy<CpuidResult> = Lazy::new(|| {
     __cpuid(1)
 });

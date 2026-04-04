@@ -1,7 +1,7 @@
 use core::fmt::{Debug, Display, Formatter};
 use crate::version::types::VersionInfo;
 
-impl Debug for VersionInfo<'_> {
+impl Debug for VersionInfo {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         writeln!(f, "--- version info ---")?;
 
@@ -14,7 +14,7 @@ impl Debug for VersionInfo<'_> {
             writeln!(f, "version: {}", self.build.version)?;
             writeln!(f, "cycle: {}", self.build.cycle)?;
 
-            let profile = self.build.profile.as_ref();
+            let profile = self.build.profile.as_str();
             writeln!(f, "profile: {}", profile)?;
 
             write!(f, "features: [")?;
@@ -71,7 +71,7 @@ impl Debug for VersionInfo<'_> {
     }
 }
 
-impl Display for VersionInfo<'_> {
+impl Display for VersionInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(
             f,

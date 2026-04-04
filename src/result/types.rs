@@ -190,3 +190,43 @@ unsafe impl Sync for Error {}
 
 impl core_error::Error for Error {}
 impl core::error::Error for Error {}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_creation() {
+        let err = Error::new(ErrorType::InternalError, Some("static message"));
+        assert_eq!(format!("{}", err), "[InternalError] static message");
+
+        let err_owned = Error::new_string(ErrorType::DeviceError, Some(String::from("owned message")));
+        assert!(matches!(err_owned.error_type, ErrorType::DeviceError));
+        assert_eq!(err_owned.message.unwrap(), "owned message");
+    }
+
+    #[test]
+    #[cfg(feature = "enable_error_location_caller")]
+    fn test_error_location() {
+        let err = Error::new(ErrorType::FileNotFound, None);
+        assert!(err.caller.is_some());
+    }
+
+    #[test]
+    fn test_try_raise_downcast() {
+        let inner_err = Error::new(ErrorType::IndexMax, None);
+        let result: Result<u32> = Error::try_raise(Err(inner_err), Some("raising again"));
+
+        match result {
+            Err(e) => {
+                if let ErrorType::ErrorRaised(boxed_err) = e.error_type {
+                    assert!(matches!(boxed_err.error_type, ErrorType::IndexMax));
+                } else {
+                    panic!("Should be ErrorRaised");
+                }
+            }
+            _ => panic!("Should be Err"),
+        }
+    }
+}

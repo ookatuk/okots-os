@@ -1,13 +1,11 @@
 use alloc::boxed::Box;
-use alloc::string::String;
 use core::hint::{cold_path, likely, unlikely};
-use spin::{Lazy, Once};
-use x86_64::instructions::interrupts::without_interrupts;
+use spin::{Once};
+use crate::util::debug::with_interr;
 use x86_64::instructions::segmentation::{Segment, CS};
 use x86_64::instructions::tables::load_tss;
 use x86_64::registers::segmentation::SegmentSelector;
 use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable};
-use x86_64::structures::idt::InterruptDescriptorTable;
 use x86_64::structures::tss::TaskStateSegment;
 use x86_64::VirtAddr;
 use crate::cpu::cpu_id;
@@ -128,7 +126,7 @@ pub fn init_gdt() {
     let code_selector = SegmentSelector::new(1, x86_64::PrivilegeLevel::Ring0);
     let data_selector = SegmentSelector::new(2, x86_64::PrivilegeLevel::Ring0);
 
-    without_interrupts(|| {
+    with_interr(|| {
         gdt_ptr.load();
 
         unsafe {

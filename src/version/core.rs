@@ -1,5 +1,7 @@
-use alloc::borrow::Cow;
 use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
 use const_format::formatcp;
 use const_str::split;
 
@@ -50,62 +52,60 @@ const GIT_HASH: &[u8] = decode_hex!(env!("GIT_HASH"));
 const FEATURES: &[&str] = &split!(env!("BUILD_FEATURES"), ",");
 
 
-impl VersionInfo<'_> {
-    pub fn new_os() -> VersionInfo<'static> {
-        let mut info = const {
+impl VersionInfo {
+    pub fn new_os() -> VersionInfo {
             let build = BuildInfo {
-                name: Cow::Borrowed(OS_NAME),
-                features: Cow::Borrowed(&[]),
-                profile: Cow::Borrowed(env!("OS_PROFILE")),
-                cycle: Cow::Borrowed(env!("OS_CYCLE")),
-                version: Cow::Borrowed(formatcp!("{VERSION_RAW}_{MICRO_VER}")),
+                name: OS_NAME.to_string(),
+                features: Vec::new(),
+                profile: env!("OS_PROFILE").to_string(),
+                cycle: env!("OS_CYCLE").to_string(),
+                version: formatcp!("{VERSION_RAW}_{MICRO_VER}").to_string(),
             };
 
             let git = GitInfo {
-                url: Cow::Borrowed(env!("GIT_URL")),
-                branch: Cow::Borrowed(env!("GIT_BRANCH")),
-                dirty: Cow::Borrowed(env!("GIT_DIRTY"))
+                url: env!("GIT_URL").to_string(),
+                branch: env!("GIT_BRANCH").to_string(),
+                dirty: env!("GIT_DIRTY").to_string()
             };
 
             let builder = BuilderInfo {
-                version: Cow::Borrowed(env!("RUST_VER")),
-                info: Cow::Borrowed(env!("RUST_VERSION_INFO")),
-                name: Cow::Borrowed("rust"),
+                version: env!("RUST_VER").to_string(),
+                info: env!("RUST_VERSION_INFO").to_string(),
+                name: "rust".to_string(),
             };
 
             let developer = DeveloperInfo {
-                developer: Cow::Borrowed(env!("GIT_USER")),
-                link: Cow::Borrowed(concat!("https://github.com/", env!("GIT_USER"))),
+                developer: env!("GIT_USER").to_string(),
+                link: concat!("https://github.com/", env!("GIT_USER")).to_string(),
             };
 
             let hash = HashInfo {
 
-                dir_hash: Cow::Borrowed(&[
-                    HashVariant::Sha3_512(Cow::Borrowed(DIR_HASH))
-                ]),
-                git_hash: Cow::Borrowed(&[
-                    HashVariant::Sha1Dc(Cow::Borrowed(GIT_HASH))
-                ]),
+                dir_hash: vec![
+                    HashVariant::Sha3_512(DIR_HASH.to_vec())
+                ],
+                git_hash: vec![
+                    HashVariant::Sha1Dc(GIT_HASH.to_vec())
+                ],
             };
 
-            VersionInfo {
-                data_version: VERSION_DATA_VERSION,
-                git: Some(git),
-                builder: Some(builder),
-                developer,
-                build,
-                hash,
-                additional: BTreeMap::new(),
-            }
+        let mut info = VersionInfo {
+            data_version: VERSION_DATA_VERSION,
+            git: Some(git),
+            builder: Some(builder),
+            developer,
+            build,
+            hash,
+            additional: BTreeMap::new(),
         };
 
-        let entries = const { [
-                (Cow::Borrowed("OsBuildHost"), Cow::Borrowed(env!("BUILD_HOST"))),
-                (Cow::Borrowed("OsBuildTarget"), Cow::Borrowed(env!("BUILD_TARGET"))),
-        ]};
+        let entries = [
+            ("OsBuildHost".to_string(), env!("BUILD_HOST").to_string()),
+            ("OsBuildTarget".to_string(), env!("BUILD_TARGET").to_string()),
+        ];
 
-        info.additional = entries.into_iter().collect::<BTreeMap<Cow<str>, Cow<str>>>();
-        info.build.features = FEATURES.iter().map(|&s| Cow::Borrowed(s)).collect();
+        info.additional = entries.into_iter().collect::<BTreeMap<String, String>>();
+        info.build.features = FEATURES.iter().map(|&s| s.to_string()).collect();
 
         info
     }

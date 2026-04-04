@@ -1,9 +1,8 @@
 use acpi::{AcpiTable, Handler};
-use crate::{log_info, log_warn, MAIN_COPY};
+use crate::{log_info, log_warn};
 
 pub fn a() {
     let table = crate::acpi::core::ACPI_TABLE_TMP_HANDLER.get().unwrap();
-    let mcp = MAIN_COPY.get().unwrap();
 
     for mcfg in table.find_tables::<acpi::sdt::mcfg::Mcfg>() {
         if mcfg.validate().is_err() {

@@ -1,4 +1,4 @@
-use alloc::alloc::{alloc, dealloc};
+use alloc::alloc::{alloc};
 use core::alloc::Layout;
 use core::ptr;
 use uefi::boot;
@@ -27,6 +27,7 @@ impl Iterator for MemoryMapIter {
 
 pub struct MyMemoryMapOwned {
     ptr: *mut u8,
+    #[allow(unused)]
     layout: Layout,
     total_size: usize,
     desc_size: usize,
@@ -64,7 +65,7 @@ pub unsafe fn exit_boot_services_with_talc() -> MyMemoryMapOwned {
     assert!(desc_size > 0, "desc_size is 0");
 
     let extra_space = desc_size * 8;
-    let mut buffer_capacity = map_size + extra_space;
+    let buffer_capacity = map_size + extra_space;
     let layout = Layout::from_size_align(buffer_capacity, 4096).unwrap();
     let buffer_ptr = unsafe { alloc(layout) };
 

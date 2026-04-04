@@ -1,12 +1,19 @@
+#![allow(incomplete_features)]
+
 #![feature(likely_unlikely)]
 #![feature(portable_simd)]
 #![feature(const_trait_impl)]
 #![feature(abi_x86_interrupt)]
-#![feature(generic_const_exprs)]
-#![no_std]
-#![no_main]
 
-#[cfg(not(all(target_arch = "x86_64", target_os = "uefi")))]
+#![feature(generic_const_exprs)]
+
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
+
+#[cfg(all(
+    not(all(target_arch = "x86_64", target_os = "uefi")),
+    not(test)
+))]
 compile_error!("Unsupported target. Please use 'x86_64-unknown-uefi'.");
 
 extern crate alloc;
@@ -15,13 +22,13 @@ const VERSION_RAW: &str = "1.0.0";
 
 const MICRO_VER: u32 = 0;
 
-const OS_NAME: &str = "test_os_v2";
+const OS_NAME: &str = "okots";
 
 /// OSプロトコルバージョン.
 const DEBUG_PROTOCOL_VERSION: &str = "2.0";
-
+#[allow(unused)]
 const PANICED_TO_RESTART_TIME: usize = 20;
-const STACK_SIZE: usize = 1024 * 32;
+const STACK_SIZE: usize = 1024 * 64;
 const ALLOCATOR_FIRST_CREATE_SIZE_OPTION_MAX_ALLOCATE_SIZE: usize = 1024 * 1024 * 1024 * 2;
 const ALLOCATOR_FIRST_CREATE_SIZE_OPTION_MIN_ALLOCATE_SIZE: usize = 4096 * 2;
 
@@ -34,24 +41,37 @@ unsafe extern "C" {
     pub static __ImageBase: u8;
 }
 
-use alloc::{format, vec};
+#[cfg(not(test))]
+use alloc::{format};
+#[cfg(not(test))]
 use alloc::string::ToString;
+#[cfg(not(test))]
+use core::panic::PanicInfo;
+#[cfg(not(test))]
+use core::sync::atomic::Ordering;
+
+use alloc::{vec};
 use alloc::vec::Vec;
-use core::arch::{naked_asm};
+use core::alloc::Layout;
+use core::arch::{asm, naked_asm};
 use core::ffi::c_void;
 use core::hint::{spin_loop};
-use core::panic::PanicInfo;
-use core::sync::atomic::Ordering;
+use core::ptr::write_volatile;
+use core::sync::atomic::AtomicUsize;
 use core::time::Duration;
 use spin::{Once, RwLock};
 use uefi::boot::{set_image_handle, AllocateType};
 use uefi::mem::memory_map::MemoryMap;
 use uefi::table::set_system_table;
 use uefi_raw::table::boot::{MemoryType, PAGE_SIZE};
-use x86_64::instructions::interrupts::{without_interrupts};
+use x86_64::instructions::interrupts;
+use x86_64::instructions::interrupts::int3;
+use x86_64::structures::paging::PageTable;
+use crate::apic_helper::{broadcast_init_ipi_exc_self, broadcast_ipi_exc_self, send_init_ipi, send_sipi, ICR_STARTUP};
+use crate::util::debug::with_interr;
 use crate::cpu::cpu_id;
 use crate::cpu::utils::{get_vendor_name_raw, vendor_list};
-use crate::memory::paging::{PageEntryFlags, PageLevel};
+use crate::memory::paging::{PageEntryFlags, PageLevel, TopPageTable};
 use crate::thread_local::read_gs;
 use crate::timer::rtc::RTC;
 use crate::timer::Timer;
@@ -59,7 +79,6 @@ use crate::timer::tsc::TSC;
 use crate::uefi_helper::boot::MyMemoryMapOwned;
 use crate::util::proto;
 use crate::util_types::MemRangeData;
-use crate::version::OS_VERSION;
 
 mod io;
 mod manager;
@@ -82,7 +101,7 @@ pub mod interrupt;
 pub mod multi_core;
 pub mod apic_helper;
 
-#[global_allocator]
+#[cfg_attr(not(test), global_allocator)]
 /// 物理/仮想アロケーター.
 pub static ALLOC: memory::physical_allocator::OsPhysicalAllocator = memory::physical_allocator::OsPhysicalAllocator::new();
 
@@ -105,6 +124,7 @@ struct Main {
     stack_data: RwLock<StackData>,
     core_info: RwLock<Vec<u32>>,
     uefi_map: Once<MyMemoryMapOwned>,
+    test: AtomicUsize,
 }
 static MAIN_COPY: Once<&'static Main> = Once::new();
 
@@ -119,7 +139,7 @@ impl Main {
 
         MAIN_COPY.call_once(|| {self});
 
-        without_interrupts(|| {
+        with_interr(|| {
             let mut lock = self.stack_data.write();
             lock.top = stack_top as *mut u8;
             lock.len = stack_len as usize;
@@ -144,9 +164,75 @@ impl Main {
 
         apic_helper::init_local_apic();
 
-        drivers::disk::virt_io::a();
+        // drivers::disk::virt_io::a();
+
+        let len = with_interr(|| self.core_info.read().len());
+
+        let table = read_gs().unwrap().page_table.ptr();
+
+        let mut stacks = Vec::with_capacity(len);
+
+        for _ in 0..len {
+            let ptr = alloc::alloc::alloc(Layout::from_size_align(STACK_SIZE, 4096).unwrap());
+
+            if ptr.is_null() {
+                panic!("failed to allocate stack.");
+            }
+
+            stacks.push(ptr.add(STACK_SIZE));
+        }
+
+        self.util_update_add_paging::<true>(
+            stacks.iter().map(|x| {
+                let low = x.sub(STACK_SIZE);
+                MemRangeData::new(
+                    low.addr(),
+                    STACK_SIZE
+                )
+            }).collect(),
+            vec![PageEntryFlags::PRESENT | PageEntryFlags::WRITABLE; stacks.len()],
+        ).unwrap();
+
+        stacks.push(1 as *mut u8);
+
+        unsafe{asm!("wbinvd", options(nomem, nostack))};
+
+        multi_core::init::raw::init_trampoline::<false>(
+            Self::a as u64,
+            stacks.as_mut_slice(),
+            self.uefi_map.get().unwrap(),
+            table
+        ).unwrap();
+
+        broadcast_init_ipi_exc_self();
+        TSC.spin(Duration::from_millis(10));
+        for _ in 0..2 {
+            broadcast_ipi_exc_self(ICR_STARTUP, 0x08);
+            TSC.spin(Duration::from_micros(200));
+        }
+
+        TSC.spin(Duration::from_secs(5));
+        deb!("{}", (self.test.load(Ordering::Relaxed) as i32));
 
         log_last!("kernel", "info", "reached last.");
+        loop {
+            spin_loop();
+        }
+    }
+
+    pub fn a() -> ! {
+        let me = MAIN_COPY.get().unwrap();
+
+        me.test();
+    }
+
+    pub fn test(&'static self) -> ! {
+        self.test.fetch_add(1, Ordering::Relaxed);
+        unsafe{thread_local::write_none()};
+        interrupt::api::init();
+        interrupts::enable();
+        self.util_update_add_paging::<false>(vec![], vec![]);
+
         loop {
             spin_loop();
         }
@@ -156,7 +242,7 @@ impl Main {
         extern "efiapi" fn internal(a: *mut c_void) {
             let me = unsafe { &*(a as *const Main) };
 
-            without_interrupts(|| {
+            with_interr(|| {
                 let mut lock = me.core_info.write();
                 let id = {
                     let mut ret = 0;
@@ -187,7 +273,7 @@ impl Main {
         }
 
         let pro = proto::open::<uefi::proto::pi::mp::MpServices>(None)?;
-        without_interrupts(|| {
+        with_interr(|| {
             let mut lock = self.core_info.write();
             lock.reserve(pro.get_number_of_processors().unwrap().enabled);
         });
@@ -246,7 +332,7 @@ impl Main {
             }
         }
 
-        without_interrupts(|| {
+        with_interr(|| {
             let lock = self.stack_data.read();
             t.push(MemRangeData::new(lock.top as usize, lock.len));
             r.push(PageEntryFlags::PRESENT | PageEntryFlags::WRITABLE | PageEntryFlags::EXECUTE_DISABLE);
@@ -283,7 +369,7 @@ impl Main {
             }
         }
 
-        without_interrupts(|| {
+        with_interr(|| {
             let data = {
                 let lock = ALLOC.os_allocator.lock();
                 let counter = lock.counters();
@@ -336,7 +422,7 @@ impl Main {
 
         unsafe{ALLOC.change_to_os_allocator()};
 
-        without_interrupts(|| {
+        with_interr(|| {
             let data = ALLOC.os_allocator.lock().counters().total_claimed_bytes;
 
             log_custom!("s", "ds", "am", "{}", data);
@@ -375,11 +461,51 @@ impl Main {
             if cpu_info!(current::paging::Pml5) {PageLevel::Pml5} else {PageLevel::Pml4},
         )?;
         memory::paging::set_current(&res);
-        let old = read_gs().unwrap().page_table.clone();
-        if FREE {unsafe{memory::paging::dealloc_all(old)}};
+        if FREE {
+            let old = read_gs().unwrap().page_table.clone();
+            unsafe{memory::paging::dealloc_all(old)}
+        };
         read_gs().unwrap().page_table = res;
 
         Ok(())
+    }
+
+    fn clone_paging(
+        &'static self,
+    ) -> result::Result<TopPageTable> {
+        let nx_mask = !PageEntryFlags::EXECUTE_DISABLE;
+
+        let old = &read_gs().unwrap().page_table.memory_mapping;
+
+        let mut map_list = old.0.clone();
+
+        let mut flags = old.1.clone();
+
+        let mut i = 0;
+        flags.retain_mut(|f| {
+            if !cpu_info!(environment::paging::NX) {
+                *f &= nx_mask;
+            }
+
+            let keep = !f.is_empty();
+
+            if !keep {
+                map_list.remove(i);
+            } else {
+                i += 1;
+            }
+
+            keep
+        });
+
+        let res = memory::paging::create_page_table(
+            &mut map_list,
+            &mut flags,
+            if cpu_info!(environment::paging::PdptHuge) {PageLevel::Pdpt} else {PageLevel::Pd},
+            if cpu_info!(current::paging::Pml5) {PageLevel::Pml5} else {PageLevel::Pml4},
+        )?;
+
+        Ok(res)
     }
 
     pub fn util_update_add_paging<const FREE: bool>(
@@ -400,7 +526,7 @@ impl Main {
 }
 
 pub mod _internal_init {
-    use crate::{deb, io, log_custom, log_info, thread_local, Main, DEBUG_PROTOCOL_VERSION, STACK_SIZE};
+    use crate::{io, log_custom, log_info, thread_local, Main, DEBUG_PROTOCOL_VERSION, STACK_SIZE};
     use core::alloc::Layout;
     use core::ptr;
     use uefi::runtime;
@@ -588,7 +714,6 @@ fn panic(info: &PanicInfo) -> ! {
     logger::core::LOG_CAPACITY.store(0, Ordering::SeqCst);
 
     log_last!("kernel", "panic", "panic raised.");
-    log_last!("kernel", "panic", "version: {:?}", *OS_VERSION);
 
     log_last!("kernel", "panic", "{}\n{}", loc, message);
 

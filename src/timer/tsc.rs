@@ -3,7 +3,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use core::time::Duration;
 use spin::{Lazy, RwLock};
 use x86::time::rdtsc;
-use x86_64::instructions::interrupts::without_interrupts;
+use crate::util::debug::with_interr;
 use crate::{cpu_info};
 use crate::thread_local::read_gs;
 use crate::timer::{Timer, TimerConst, TimerConstTimeStampInfo};
@@ -36,7 +36,7 @@ impl Tsc {
     }
 
     pub fn init_for_ap(&self, timer: fn(Duration) -> (), wait: Duration) {
-        if without_interrupts(|| -> bool {
+        if with_interr(|| -> bool {
             let gs = read_gs().unwrap();
             if gs.tsc_init {
                 return true;
@@ -50,7 +50,7 @@ impl Tsc {
             return;
         }
 
-        let (start, end) = without_interrupts(|| {
+        let (start, end) = with_interr(|| {
             let start = Self::get();
             timer(wait);
             let end = Self::get();
@@ -63,7 +63,7 @@ impl Tsc {
         if units == 0 { return; }
         let par_100ns_value = count / units;
 
-        without_interrupts(|| {
+        with_interr(|| {
             let gs = read_gs().unwrap();
             gs.tsc_init = true;
         });
@@ -71,7 +71,7 @@ impl Tsc {
         if self.is_invariant {
             self.par_100ns.store(par_100ns_value, Ordering::SeqCst);
         } else {
-            without_interrupts(|| {
+            with_interr(|| {
                 let gs = read_gs().unwrap();
                 gs.tsc_data.par_100ns = par_100ns_value;
             });
@@ -80,9 +80,12 @@ impl Tsc {
 
     pub fn get_val(&self) -> u64 {
         if self.is_invariant {
-            self.par_100ns.load(Ordering::SeqCst)
+            with_interr(|| {
+                let gs = read_gs().unwrap();
+                self.par_100ns.load(Ordering::Acquire) + gs.tsc_data.adjust
+            })
         } else {
-            without_interrupts(|| {
+            with_interr(|| {
                 let gs = read_gs().unwrap();
                 gs.tsc_data.par_100ns + gs.tsc_data.adjust
             })
@@ -134,7 +137,7 @@ impl Timer for Tsc {
     }
 
     fn option_init_time_stamp(&self, utc: Duration) {
-        without_interrupts(|| {
+        with_interr(|| {
             let current_time = self.get_time();
             let target = utc - current_time;
 
@@ -144,7 +147,7 @@ impl Timer for Tsc {
     }
 
     fn get_world_time_utc(&self) -> Option<Duration> {
-        let offset = without_interrupts(|| *self.utc_offset.read());
+        let offset = with_interr(|| *self.utc_offset.read());
 
         if offset.is_zero() {
             return None;

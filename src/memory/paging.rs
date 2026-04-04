@@ -1,5 +1,4 @@
 use alloc::alloc::dealloc;
-use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::bitflags;
 use core::alloc::Layout;
@@ -16,11 +15,10 @@ use x86::tlb::flush_all;
 use x86_64::registers::control::{Cr3, Cr3Flags, Cr4, Cr4Flags};
 use x86_64::structures::paging::{PageTable, PageTableFlags, PhysFrame};
 use x86_64::{PhysAddr, VirtAddr};
-use crate::{deb, result};
+use crate::{result};
 use crate::result::{Error, ErrorType};
 use crate::util_types::MemRangeData;
 
-const PT_SIZE: usize = 4096;
 pub const PHY_OFFSET: usize = 0;
 
 const RELAY_FLAGS: PageEntryFlags = PageEntryFlags::from_bits_retain(
@@ -172,7 +170,6 @@ impl CustomType for TopPageTable {
     fn build(mut builder: rhai::TypeBuilder<Self>) {
         builder.with_set("set_addr", |me: &mut Self, value: i64| {
             let virt_addr = VirtAddr::new(value as u64);
-            let phys_addr = get_addr(virt_addr);
             me.virt = virt_addr;
         });
     }
@@ -213,7 +210,7 @@ pub fn create_page_table(
 
     normalize_map_list(map_list, flags);
 
-    let (ptr, phys) = match target {
+    let (_, phys) = match target {
         PageLevel::Pml5 | PageLevel::Pml4 => {
             let table_addr = create_recursive(0, target, map_list, flags, allow_huge_at)?;
             (
@@ -500,7 +497,7 @@ unsafe fn dealloc_recursive(target: &mut PageTable, level: PageLevel) {
             if !i.flags().contains(PageTableFlags::PRESENT) { continue; }
 
             if !i.flags().contains(PageTableFlags::HUGE_PAGE) {
-                unsafe{dealloc_recursive(unsafe { &mut *(unsafe { i.addr().as_u64() + PHY_OFFSET as u64 } as *mut PageTable) }, level.down().unwrap())};
+                unsafe{dealloc_recursive(&mut *((i.addr().as_u64() + PHY_OFFSET as u64) as *mut PageTable), level.down().unwrap())};
             }
         }
     }

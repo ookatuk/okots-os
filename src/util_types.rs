@@ -21,20 +21,21 @@ impl CanRangeData for u32 {}
 impl CanRangeData for u64 {}
 impl CanRangeData for u128 {}
 
-pub struct SmartPtr<DT, GA> where
+pub struct SmartPtr<'a, DT, GA>
+where
     DT: CanRangeData + Rem<Output = DT>,
-    GA: GlobalAlloc + 'static,
+    GA: GlobalAlloc + 'a,
 {
     pub range: MemRangeData<DT>,
-    pub alloc: &'static GA,
+    pub alloc: &'a GA,
     align: usize,
 }
 
-impl<DT, GA> SmartPtr<DT, GA> where
+impl<'a, DT, GA> SmartPtr<'a, DT, GA> where
     DT: CanRangeData + Div<Output = DT> + Rem<Output = DT>,
     GA: GlobalAlloc,
 {
-    pub fn new(ptr: usize, layout: Layout, alloc: &'static GA) -> Option<Self> {
+    pub fn new(ptr: usize, layout: Layout, alloc: &'a GA) -> Option<Self> {
         if unlikely(ptr.is_zero() || layout.size().is_zero()) {
             return None;
         }
@@ -113,7 +114,7 @@ impl<DT, GA> SmartPtr<DT, GA> where
     }
 }
 
-impl<DT, GA> Drop for SmartPtr<DT, GA> where
+impl<DT, GA> Drop for SmartPtr<'_, DT, GA> where
     DT: CanRangeData + Div<Output = DT> + Rem<Output = DT>,
     GA: GlobalAlloc,
 {
@@ -151,7 +152,7 @@ impl<T> MemRangeData<T> where
 
     #[inline]
     pub fn new_start_end(start: T, end: T) -> Option<MemRangeData<T>> {
-        if unlikely(end > start) {
+        if unlikely(end < start) {
             return None;
         }
 
@@ -193,5 +194,80 @@ impl<T> MemRangeData<T> where
     #[inline]
     pub fn set_len(&mut self, len: T) {
         self.len = len;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::sync::atomic::{AtomicIsize, Ordering};
+    use super::*;
+
+    #[test]
+    fn mem_range_data_test_1() {
+        let data: MemRangeData<u64> = MemRangeData::new(50, 60);
+        let data2: MemRangeData<u64> = MemRangeData::new_start_end(50, 110).expect("data is good. but returned none.");
+
+        assert_eq!(data.len(), 60, "basic fails(1)");
+        assert_eq!(data.start(), 50, "basic fails(2)");
+        assert_eq!(data.end(), 110, "basic fails(3)");
+
+        assert_eq!(data2, data, "this is eq, but shown not eq");
+
+        let fail: Option<MemRangeData<u64>> = MemRangeData::new_start_end(50, 40);
+        assert!(fail.is_none(), "data is invalid, but not error raised.");
+    }
+
+    #[derive(Default)]
+    struct TmpAlloc {
+        pub remaining_count: AtomicIsize,
+    }
+
+    unsafe impl GlobalAlloc for TmpAlloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            self.remaining_count.fetch_add(1, Ordering::SeqCst);
+            unsafe{alloc::alloc::alloc(layout)}
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            self.remaining_count.fetch_sub(1, Ordering::SeqCst);
+            unsafe{alloc::alloc::dealloc(ptr, layout)}
+        }
+    }
+
+    #[test]
+    fn smart_ptr() {
+        let alloc = TmpAlloc::default();
+
+        {
+            let layout = Layout::from_size_align(64, 16).unwrap();
+            let allocated = unsafe{alloc.alloc(layout)};
+            {
+                let tmp = allocated as *mut u64;
+                unsafe {
+                    for i in 0..(64 / 8) {
+                        tmp.add(i).write(i as u64);
+                    }
+                }
+            }
+
+            assert!(!allocated.is_null(), "failed to allocate memory");
+
+            let smart_ptr = SmartPtr::<u64, TmpAlloc>::new(allocated.addr(), layout, &alloc);
+
+            assert!(smart_ptr.is_some(), "SmartPtr::new() broken.");
+            let smart_ptr = smart_ptr.unwrap();
+
+            let slice = smart_ptr.get_slice::<u64>();
+
+            assert!(slice.is_some(), "slice system is broken.");
+
+            let slice = slice.unwrap();
+
+            for (l, i) in slice.iter().enumerate() {
+                assert_eq!(*i, l as u64, "data broken/invalid ptr");
+            }
+        }
+
+        assert_eq!(alloc.remaining_count.load(Ordering::SeqCst), 0, "memory leak detected.");
     }
 }

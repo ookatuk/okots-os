@@ -1,5 +1,4 @@
 [build]
-target = "x86_64-unknown-uefi"
 rustc-wrapper = "/usr/bin/sccache"
 target-dir = "/dev/shm/rust_target/my_os_v2"
 
@@ -15,6 +14,3 @@ rustflags = [
 ]
 
 runner = "sh ./scripts/run.sh"
-
-[unstable]
-build-std = ["core", "alloc"]

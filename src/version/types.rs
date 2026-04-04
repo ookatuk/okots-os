@@ -1,55 +1,58 @@
-use alloc::borrow::{Cow};
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use core::fmt::{Debug, Display, Formatter};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use crate::result;
 use crate::result::{Error, ErrorType};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OptInfo<'a> {
-    pub opt: Cow<'a, [Cow<'a, str>]>,
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct OptInfo {
+    pub opt: Vec<String>,
     pub debug: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GitInfo<'a> {
-    pub url: Cow<'a, str>,
-    pub branch: Cow<'a, str>,
-    pub dirty: Cow<'a, str>,
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct GitInfo {
+    pub url: String,
+    pub branch: String,
+    pub dirty: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BuilderInfo<'a> {
-    pub version: Cow<'a, str>,
-    pub info: Cow<'a, str>,
-    pub name: Cow<'a, str>,
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct BuilderInfo {
+    pub version: String,
+    pub info: String,
+    pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeveloperInfo<'a> {
-    pub developer: Cow<'a, str>,
-    pub link: Cow<'a, str>,
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct DeveloperInfo {
+    pub developer: String,
+    pub link: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BuildInfo<'a> {
-    pub name: Cow<'a, str>,
-    pub features: Cow<'a,[Cow<'a, str>]>,
-    pub profile: Cow<'a, str>,
-    pub cycle: Cow<'a, str>,
-    pub version: Cow<'a, str>,
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct BuildInfo {
+    pub name: String,
+    pub features: Vec<String>,
+    pub profile: String,
+    pub cycle: String,
+    pub version: String,
 }
 
 #[repr(C)]
+#[derive(Eq, PartialEq)]
 pub struct HashFnData {
     pub ptr: *const u8,
     pub len: u64,
 }
 
 #[repr(C)]
+#[derive(Eq, PartialEq)]
+
 pub struct HashFnArgs {
     pub args: *const *const u8,
     pub str_len: *const u32,
@@ -57,57 +60,55 @@ pub struct HashFnArgs {
 }
 
 #[repr(C)]
+#[derive(Eq, PartialEq)]
+
 pub struct LenResult {
     pub success: bool,
     pub len: u64,
 }
 
-#[derive(Debug, Clone)]
-pub enum HashVariant<'a> {
-    Sha1(Cow<'a, [u8]>),
-    Sha1Dc(Cow<'a, [u8]>),
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum HashVariant {
+    Sha1(Vec<u8>),
+    Sha1Dc(Vec<u8>),
 
-    Sha2_256(Cow<'a, [u8]>),
-    Sha2_512(Cow<'a, [u8]>),
-    Sha2_512_256(Cow<'a, [u8]>),
+    Sha2_256(Vec<u8>),
+    Sha2_512(Vec<u8>),
+    Sha2_512_256(Vec<u8>),
 
-    Sha3_256(Cow<'a, [u8]>),
-    Sha3_512(Cow<'a, [u8]>),
+    Sha3_256(Vec<u8>),
+    Sha3_512(Vec<u8>),
 
-    Blake2B(Cow<'a, [u8]>),
-    Blake2S(Cow<'a, [u8]>),
+    Blake2B(Vec<u8>),
+    Blake2S(Vec<u8>),
 
-    Blake3(Cow<'a, [u8]>),
+    Blake3(Vec<u8>),
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct HashInfo<'a> {
-    #[serde(bound(deserialize = "HashVariant<'a>: Deserialize<'de>, 'de: 'a"))]
-    pub dir_hash: Cow<'a,[HashVariant<'a>]>,
-    #[serde(bound(deserialize = "HashVariant<'a>: Deserialize<'de>, 'de: 'a"))]
-    pub git_hash: Cow<'a,[HashVariant<'a>]>,
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Eq, PartialEq)]
+pub struct HashInfo {
+    pub dir_hash: Vec<HashVariant>,
+    pub git_hash: Vec<HashVariant>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct VersionInfo<'a> {
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct VersionInfo {
     pub data_version: u32,
-    pub git: Option<GitInfo<'a>>,
-    pub builder: Option<BuilderInfo<'a>>,
-    pub developer: DeveloperInfo<'a>,
-    pub build: BuildInfo<'a>,
-    #[serde(bound(deserialize = "HashVariant<'a>: Deserialize<'de>, 'de: 'a"))]
-    pub hash: HashInfo<'a>,
-    #[serde(borrow)]
-    pub additional: BTreeMap<Cow<'a, str>, Cow<'a, str>>,
+    pub git: Option<GitInfo>,
+    pub builder: Option<BuilderInfo>,
+    pub developer: DeveloperInfo,
+    pub build: BuildInfo,
+    pub hash: HashInfo,
+    pub additional: BTreeMap<String, String>,
 }
 
-impl Display for HashVariant<'_> {
+impl Display for HashVariant {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}: {}", self.algo(), self.hash())
     }
 }
 
-impl HashVariant<'_> {
+impl HashVariant {
     #[inline]
     pub fn hash(&self) -> String {
         let bytes = match self {
@@ -143,7 +144,7 @@ impl HashVariant<'_> {
         }.to_string()
     }
 
-    pub fn from_parts<'a>(algo: &str, hash: Cow<'a, [u8]>) -> result::Result<HashVariant<'a>> {
+    pub fn from_parts(algo: &str, hash: Vec<u8>) -> result::Result<HashVariant> {
         match algo {
             "SHA-1" => Ok(HashVariant::Sha1(hash)),
             "SHA-1DC" => Ok(HashVariant::Sha1Dc(hash)),
@@ -172,11 +173,33 @@ pub enum EcdsaType {
 }
 
 #[derive(Debug, Clone)]
-pub enum SignVariant<'a> {
-    RsaPss2048(HashVariant<'a>, Cow<'a, [u8]>),
-    RsaPss4096(HashVariant<'a>, Cow<'a, [u8]>),
-    ECDSA(EcdsaType, HashVariant<'a>, Cow<'a, [u8]>),
-    ED25519(Cow<'a, [u8]>),
-    ED448(Cow<'a, [u8]>),
-    DILITHIUM(u8, Cow<'a, [u8]>)
+pub enum SignVariant {
+    RsaPss2048(HashVariant, String),
+    RsaPss4096(HashVariant, String),
+    ECDSA(EcdsaType, HashVariant, String),
+    ED25519(String),
+    ED448(String),
+    DILITHIUM(u8, String)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec::Vec;
+    use crate::version::OS_VERSION;
+
+    #[test]
+    fn test_version_info_roundtrip() {
+        let data = yaml_peg::serde::to_string(&*OS_VERSION).unwrap();
+
+        let decoded: Vec<VersionInfo> = yaml_peg::serde::from_str(&data).expect("Failed to deserialize");
+
+        if decoded.len() != 1 {
+            panic!("len is bad")
+        }
+
+        let decoded = decoded.get(0).unwrap();
+
+        assert_eq!(decoded, &*OS_VERSION);
+    }
 }

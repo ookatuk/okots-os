@@ -1,17 +1,13 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::addr_of;
 use core::sync::atomic::{AtomicU8, Ordering};
-use x86_64::structures::tss::TaskStateSegment;
-use x86_64::{PrivilegeLevel, VirtAddr};
+use x86_64::{PrivilegeLevel};
 use x86_64::structures::idt::{InterruptStackFrame, PageFaultErrorCode};
-use lazy_static::lazy_static;
 use spin::Once;
 use x86::current::segmentation::swapgs;
 use x86_64::registers::segmentation::SegmentSelector;
-use crate::{log_error, log_info, log_last, ALLOC};
-use crate::cpu::msr::read;
+use crate::{log_error, log_last, ALLOC};
 use crate::thread_local::read_gs;
 use crate::util_types::SmartPtr;
 
@@ -45,11 +41,11 @@ impl NmiArgs {
 }
 
 #[repr(align(16))]
-pub struct IdtRawStacks {
-    pub(crate) data: Vec<SmartPtr<usize, crate::memory::physical_allocator::OsPhysicalAllocator>>
+pub struct IdtRawStacks<'a> {
+    pub(crate) data: Vec<SmartPtr<'a, usize, crate::memory::physical_allocator::OsPhysicalAllocator>>
 }
 
-impl Default for IdtRawStacks {
+impl Default for IdtRawStacks<'_> {
     fn default() -> Self {
         let mut data = vec![];
         for _ in 0..2 {

@@ -1,20 +1,24 @@
-[org 0x7500]
+[bits 16]
 
+section .trampoline vstart=0x7500
+
+global args
 args:
-    .pml_addr  dq 0x56  ; PML4/5 vec addr
-    .stack     dq 0x72  ; stack  vec addr
-    .target    dq 0x85  ; target val addr
-    .frarg     dq 0x95  ; args   val addr
-    .flags     db 0b10 ; flags  val [p5/nx
-    .safety    dq 0x54855fafb595ad
 
-times (0x8000 - ($ - $$)) db 0
+global args
+args:
+    .safety    dq 0x54855fafb595ad
+    .pml_addr  dq 0x56
+    .stack     dq 0x72
+    .target    dq 0x85
+    .frarg     dq 0x95
+    .cr4       dq 0x0
+    .flags     db 0b10
+
+times (0x8000 - 0x7500) - ($ - args) db 0
 
 [bits 16]
-section .trampoline
-
 global trampoline_fn
-global args
 
 trampoline_fn:
     cli
@@ -95,6 +99,15 @@ trampoline_64:
     mov fs, ax
     mov gs, ax
 
+    mov rax, [args.cr4]
+    mov cr4, rax
+
+    mov rax, [args.pml_addr]
+    mov cr3, rax
+
+    lea rax, [rel .flushed]
+    jmp rax
+.flushed:
     mov rbx, [args.stack]
     sub rbx, 8
     xor rdx, rdx
@@ -102,57 +115,44 @@ trampoline_64:
 
 ; ---
 
-.find_iter_ended
+.find_iter_ended:
     mov eax, 0x4ffff
     ud2
-.find_iter
-    inc rdx
+.find_iter:
     add rbx, 8
     mov rax, [rbx]
 
+    test rax, rax
+    jz .next
     cmp rax, 1
     je .find_iter_ended
 
-    test rax, rax
-    jz .find_iter
-
     xor rcx, rcx
     lock cmpxchg [rbx], rcx
-    jnz .find_iter
 
-; ---
+    jz .found
 
+.next:
+    inc rdx
+    jmp .find_iter
+
+.found:
     mov rsp, rax
     mov r15, rdx
 
     and rsp, -16
-
-    mov rax, [args.pml_addr]
-
-    lea rdx, [rdx * 8]
-    sub rax, 8
-    lea rax, [rax + rdx]
-
-    mov rax, [rax]
 
     test rsp, rsp
     jnz .t64_co1
     mov eax, 0x1ffff
     ud2
 .t64_co1:
-    test rax, rax
-    jnz .t64_co2
-    mov eax, 0x2ffff
-    ud2
-.t64_co2:
     mov rdx, [args.target]
     test rdx, rdx
     jnz .stay_tmp_paging
     mov eax, 0x3ffff
     ud2
 .stay_tmp_paging:
-    mov cr3, rax
-
     mov rcx, r15
 
     jmp rdx
@@ -174,22 +174,23 @@ gdtr_64:
     dw gdt_end - gdt_start - 1
     dq gdt_start
 
-align 4096
+times (0x9000 - 0x7500) - ($ - args) db 0
+
 tmp_p5:
     dq tmp_p4 + 0b11
     times 511 dq 0
 
-align 4096
+times (0xA000 - 0x7500) - ($ - args) db 0
 tmp_p4:
     dq tmp_pdpt + 0b11
     times 511 dq 0
 
-align 4096
+times (0xB000 - 0x7500) - ($ - args) db 0
 tmp_pdpt:
     dq tmp_pd + 0b11
     times 511 dq 0
 
-align 4096
+times (0xC000 - 0x7500) - ($ - args) db 0
 tmp_pd:
     dq 0x0 + 0b10000111
     times 511 dq 0

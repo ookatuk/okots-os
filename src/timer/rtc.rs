@@ -179,3 +179,23 @@ impl Timer for Rtc {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bcd_conversion() {
+        assert_eq!(bcd_to_bin(0x12), 12);
+        assert_eq!(bcd_to_bin(0x59), 59);
+        assert_eq!(bin_to_bcd(45), 0x45);
+    }
+
+    #[test]
+    fn test_leap_year() {
+        assert!(is_leap_year(2000));
+        assert!(is_leap_year(2024));
+        assert!(!is_leap_year(2100));
+        assert!(!is_leap_year(2023));
+    }
+}

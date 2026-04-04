@@ -5,14 +5,13 @@ use core::ptr::NonNull;
 use core::time::Duration;
 use acpi::{Handle, PciAddress, PhysicalMapping};
 use acpi::aml::AmlError;
-use spin::{Lazy, Mutex, Once};
-use x86_64::instructions::interrupts::without_interrupts;
+use spin::{Lazy, Mutex};
 use x86_64::instructions::port::Port;
 use x86_64::VirtAddr;
-use crate::{deb, MAIN_COPY};
-use crate::memory::paging::{get_addr, PageEntryFlags, PHY_OFFSET};
+use crate::{MAIN_COPY};
+use crate::memory::paging::{get_addr, PageEntryFlags};
 use crate::timer::Timer;
-use crate::timer::tsc::{Tsc, TSC};
+use crate::timer::tsc::{TSC};
 use crate::util_types::MemRangeData;
 
 struct AmlMutexInner {
@@ -21,7 +20,7 @@ struct AmlMutexInner {
     count: Mutex<u32>,
 }
 
-pub static AML_MUTEXES: Lazy<Arc<Mutex<Vec<AmlMutexInner>>>> = Lazy::new(|| {Arc::new(Mutex::new(Vec::new()))});
+static AML_MUTEXES: Lazy<Arc<Mutex<Vec<AmlMutexInner>>>> = Lazy::new(|| {Arc::new(Mutex::new(Vec::new()))});
 
 #[derive(Clone, Copy)]
 pub struct TmpHandler {
@@ -76,7 +75,7 @@ impl acpi::Handler for TmpHandler {
     }
 
 
-    fn unmap_physical_region<T>(region: &PhysicalMapping<Self, T>) {
+    fn unmap_physical_region<T>(_: &PhysicalMapping<Self, T>) {
         return
     }
 

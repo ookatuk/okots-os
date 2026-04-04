@@ -1,4 +1,3 @@
-use alloc::borrow::Cow;
 use alloc::string::String;
 use core::fmt;
 use base64::Engine;
@@ -6,7 +5,7 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{MapAccess, Visitor};
 use crate::version::types::HashVariant;
 
-impl<'a> Serialize for HashVariant<'a> {
+impl<'a> Serialize for HashVariant {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -21,7 +20,7 @@ impl<'a> Serialize for HashVariant<'a> {
     }
 }
 
-impl<'de> Deserialize<'de> for HashVariant<'de> {
+impl<'de> Deserialize<'de> for HashVariant {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -33,7 +32,7 @@ impl<'de> Deserialize<'de> for HashVariant<'de> {
         struct HashVariantVisitor;
 
         impl<'de> Visitor<'de> for HashVariantVisitor {
-            type Value = HashVariant<'de>;
+            type Value = HashVariant;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("struct HashVariant")
@@ -60,7 +59,7 @@ impl<'de> Deserialize<'de> for HashVariant<'de> {
                     de::Error::invalid_value(de::Unexpected::Str(&hex_str), &"valid base64 string")
                 })?;
 
-                HashVariant::from_parts(&algo_str, Cow::Owned(hash_bytes))
+                HashVariant::from_parts(&algo_str, hash_bytes)
                     .map_err(|e| de::Error::custom(e))
             }
         }

@@ -8,10 +8,10 @@ use core::ops::DerefMut;
 use core::panic::Location;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::{Lazy, RwLock};
-use x86_64::instructions::interrupts;
 use crate::thread_local::read_gs;
 use crate::timer::Timer;
 use crate::timer::tsc::TSC;
+use crate::util::debug::with_interr;
 use super::types::OsLog;
 use super::utils::UartTmp;
 
@@ -56,7 +56,7 @@ pub(super) fn custom_internal(
 
     #[cfg(feature = "enable_uart_outputs")]
     {
-        interrupts::without_interrupts(|| {
+        with_interr(|| {
             let mut lk_lock = SERIAL1.lock();
             let mut lk = UartTmp(lk_lock.deref_mut());
             lk.send_raw(0xAA);
@@ -74,7 +74,7 @@ pub(super) fn custom_internal(
 pub fn add_log(data: &OsLog) {
     let log = Arc::new(data.clone());
 
-    interrupts::without_interrupts(|| {
+    with_interr(|| {
         let mut lock = LOG_BUF.write();
 
         let cap = LOG_CAPACITY.load(Ordering::SeqCst);
@@ -89,11 +89,11 @@ pub fn add_log(data: &OsLog) {
         }
 
         lock.push_back(log);
-    })
+    });
 }
 
 pub fn read_log(target_id: usize) -> Option<Arc<OsLog>> {
-    interrupts::without_interrupts(|| {
+    with_interr(|| {
         let head = LOG_HEAD_ID.load(Ordering::SeqCst);
         let lock = LOG_BUF.read();
         let current_len = lock.len();

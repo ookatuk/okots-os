@@ -11,20 +11,20 @@ use crate::timer::tsc::TscGsData;
 
 #[derive(Default)]
 #[repr(C)]
-pub struct ThreadLocalStorage {
-    self_ptr: *mut ThreadLocalStorage,
-    inner: ThreadLocalStorageInner,
+pub struct ThreadLocalStorage<'a> {
+    self_ptr: *mut ThreadLocalStorage<'a>,
+    inner: ThreadLocalStorageInner<'a>,
 }
 
 #[derive(Default)]
-pub struct ThreadLocalStorageInner {
+pub struct ThreadLocalStorageInner<'a> {
     pub cpu_id: u32,
     pub page_table: TopPageTable,
     pub internal_cpu_flag_cache: crate::cpu_flags::CpuFlagCache,
     pub tsc_data: TscGsData,
     pub tsc_init: bool,
     pub idt_raw: InterruptDescriptorTable,
-    pub idt_stack: IdtRawStacks
+    pub idt_stack: IdtRawStacks<'a>
 }
 
 
@@ -52,7 +52,7 @@ pub unsafe fn write_none() {
     )};
 }
 
-pub fn read_gs() -> Option<&'static mut ThreadLocalStorage> {
+pub fn read_gs() -> Option<&'static mut ThreadLocalStorage<'static>> {
     let value: *mut ThreadLocalStorage;
     unsafe {
         asm!(
@@ -65,8 +65,8 @@ pub fn read_gs() -> Option<&'static mut ThreadLocalStorage> {
     Some(unsafe{&mut *value})
 }
 
-impl Deref for ThreadLocalStorage {
-    type Target = ThreadLocalStorageInner;
+impl<'a> Deref for ThreadLocalStorage<'a> {
+    type Target = ThreadLocalStorageInner<'a>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -74,7 +74,7 @@ impl Deref for ThreadLocalStorage {
     }
 }
 
-impl DerefMut for ThreadLocalStorage {
+impl DerefMut for ThreadLocalStorage<'_> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner

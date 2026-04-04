@@ -1,12 +1,11 @@
 use acpi::AcpiTables;
-use acpi::sdt::madt::MadtEntry::LocalApic;
 use spin::Once;
 use uefi_raw::Guid;
 use uefi_raw::table::system::SystemTable;
 
 use uefi::guid;
 use crate::acpi::handler::TmpHandler;
-use crate::{deb, log_info, result};
+use crate::{result};
 use crate::result::{Error, ErrorType};
 
 pub static ACPI_TABLE_TMP_HANDLER: Once<AcpiTables<TmpHandler>> = Once::new();
