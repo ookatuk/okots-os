@@ -1,34 +1,44 @@
-> [!important]
-> this fork is old version.
-> please view v2-recreate.
+# okotu (ookatu owned test os)
+> An OS with many dependencies, seemingly meticulously designed but bit really.
 
-## Index
-- [Features](#features)
-- [Build/Debug Dependencies](#builddebug-dependencies)
-- [How to Init](#how-to-init)
-- [How to Build](#how-to-build)
-- [What is the `log_viewer` git module?](#what-is-the-logviewer-git-module)
+> [!IMPORTANT]
+> It's currently being rebuilt.
+> 
+> Also, because I'm inexperienced, the commit size is huge, so I can't guarantee proper development.
 
-## Features
-* Loading screen **before** `exit_boot_services`
-* Deep Color (10-bit) Support
-* **True Type Font(ttf)** support
+> [!TIP]
+> Please note that many comments and commits are in Japanese.
+Also, there are cases where there are no comments at all.
 
-### Enable/disable features during build
+This readme is full of jokes,
 
-* [x] Essentials checks
-* [x] Normal checks
-* [ ] Overprotective checks
-* [x] **Boot options**: Memory check, boot, and shutdown.
-* [x] **Full memory check**: Built-in check (patterns: addr, 0x00, 0xff, 0x55, 0xAA).
-* [ ] **Ligatures**: Powered by `rustybizz`. Available both before and after `exit_boot_services`.
-* [x] **UART and more!**: See `Cargo.toml` for details.
+As this project is still in an early stage, commits may be large and development may be somewhat unstable.
+# Description
+
+for `x86_64-v2` OS.
+
+I don't know its purpose!
+
+I don't know if it's compatible with common operating systems!
+
+Windows might not be(very not) compatible!
+
+We plan to specify the app version in YAML instead of XML!
+
+> [!NOTE]
+> It's possible that compatibility with Linux will be handled through a special layer.
+
+## Other Docs
+* feature flag description [click here](./docs/FEATURE_FLAGS.md)
 
 ## Build/Debug Dependencies
-
-* qemu-system-x86_64
+### Build
 * xorriso
 * mkfs.msdos(dosfstools)
+* nasm
+* sccache
+### Debug
+* qemu-system-x86_64
 * ovmf
 
 ## How to Init?
@@ -53,13 +63,33 @@
 > ```bash
 > cargo make init_project
 > # or
-> ./init.(sh/bat)
+> ./init.sh
+> # or
+> ./init.bat
 > ```
 
 > [!TIP]
 > `scripts/internal_init_script` is a common initialization script for Linux builds, not for the entire project.
 
 ## How to Build?
+
+> [!IMPORTANT]
+> Use sccache, or your SSD will scream.
+>
+> Each full build writes about 1.2GiB of data.
+>
+> To save your storage (and your sanity), we strongly recommend using sccache and moving the target folder to a temporary partition.
+>
+> We are currently seeking suggestions on how to address this issue.
+
+> [!WARNING]
+> **Microcode Notice**:
+> Microcode is prepared during the `cargo make init_project` phase, but it is **not** automatically updated or downloaded during runtime by the OS.
+>
+> If you need to manually refresh or fetch the latest microcode after the initial setup, use the following task:
+> ```bash
+> cargo make update_microcode
+> ```
 
 * If you need ISO:
 > Run:
@@ -73,16 +103,7 @@
 > cargo build
 > ```
 
-> [!WARNING]
-> **Microcode Notice**:
-> Microcode is prepared during the `cargo make init_project` phase, but it is **not** automatically updated or downloaded during runtime by the OS.
->
-> If you need to manually refresh or fetch the latest microcode after the initial setup, use the following task:
-> ```bash
-> cargo make update_microcode
-> ```
-
-## What is the `log_viewer` git module?
+## What is the `log_viewer`?
 > This is the official log viewer.
 >
 > Please note that this module is hosted in a separate repository. To use it, you must **request access** to the repository or **request the pre-compiled binary** from the maintainers.
@@ -94,3 +115,15 @@
 > ```bash
 > cargo run
 > ```
+> I just don't want to regret because my code is so bad
+
+### ---
+Are there too many dependencies?
+
+Are the development environment requirements too stringent?
+
+If there's no GUI, what's the point of using ligatures, logically speaking?
+
+If you think there are too many dependencies... you're right. Too bad!
+
+**I'm making this (a tiny bit) extravagant!**

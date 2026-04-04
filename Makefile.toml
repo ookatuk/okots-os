@@ -2,21 +2,25 @@
 skip_core_tasks = true
 
 
-# ---
-[tasks._iso_common]
-script = [ # 引数引き継ぐため
-    "cargo build --release ${@}",
+[tasks.build]
+script = [
+    "env CARGO_Z_BUILD_STD=core,alloc cargo build --target x86_64-unknown-uefi",
+]
+
+[tasks.test]
+script = [
+    "cargo test"
 ]
 
 [tasks.iso]
-extend = "_iso_common"
 script = [
+    "cargo make build",
     "sh ./scripts/build_iso.sh ${@}"
 ]
 
 [tasks.iso.windows]
-extend = "_iso_common"
 script = [
+    "cargo make build",
     "call .\\scripts\\build_iso.bat ${@}"
 ]
 # ---
@@ -28,7 +32,7 @@ script = [
 
 [tasks.init_project.windows]
 script = [
-    "call .\\init.sh"
+    "call .\\init.bat"
 ]
 # ---
 [tasks.update_microcode]

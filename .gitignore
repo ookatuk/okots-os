@@ -12,3 +12,6 @@ raw_contents/ucode/**/*
 
 
 test_os.iso
+
+.idea/
+.vscode/

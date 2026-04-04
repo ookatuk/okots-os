@@ -1,98 +1,187 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, parse::{Parse, ParseStream}, Token, LitInt, Path, Result};
+use syn::{
+    braced,
+    parse::{Parse, ParseStream},
+    parse_macro_input,
+    punctuated::Punctuated,
+    token, Ident, Token,
+};
 
-// 引数をパースするための構造体定義
-struct IdtArgs {
-    count: usize,
-    handler: Path,
+enum FlagTree {
+    Leaf(Ident),
+    Node(FlagGroup),
 }
 
-impl Parse for IdtArgs {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let count_lit: LitInt = input.parse()?; // 255
-        input.parse::<Token![,]>()?;            // ,
-        let handler: Path = input.parse()?;     // InterruptHelper::func
-        Ok(IdtArgs {
-            count: count_lit.base10_parse()?,
-            handler,
+struct FlagGroup {
+    name: Ident,
+    _brace_token: token::Brace,
+    body: Punctuated<FlagTree, Token![,]>,
+}
+
+impl Parse for FlagTree {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let name: Ident = input.parse()?;
+        if input.peek(token::Brace) {
+            let content;
+            Ok(FlagTree::Node(FlagGroup {
+                name,
+                _brace_token: braced!(content in input),
+                body: content.parse_terminated(FlagTree::parse, Token![,])?,
+            }))
+        } else {
+            Ok(FlagTree::Leaf(name))
+        }
+    }
+}
+
+struct FlagRoot {
+    flags: Punctuated<FlagTree, Token![,]>,
+}
+
+impl Parse for FlagRoot {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(FlagRoot {
+            flags: input.parse_terminated(FlagTree::parse, Token![,])?,
         })
     }
 }
 
-
 #[proc_macro]
-pub fn generate_idt_entries(input: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(input as IdtArgs);
-    let count = args.count;
-    let common_handler = &args.handler;
+pub fn define_cpu_flags(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as FlagRoot);
 
-    let mut handlers = quote!();
-    let mut table_elements = quote!();
+    let mut current_id = 0u32;
+    let mut flat_list: Vec<(u32, Ident)> = Vec::new();
 
-    // CPUがエラーコードを積むインデックス
-    let error_code_indices = [8, 10, 11, 12, 13, 14, 17, 21, 29, 30];
+    // 再帰的に mod 構造を生成
+    fn expand_tree(
+        tree: &FlagTree,
+        id_counter: &mut u32,
+        flat_list: &mut Vec<(u32, Ident)>,
+        prefix: String,
+    ) -> proc_macro2::TokenStream {
+        match tree {
+            FlagTree::Leaf(name) => {
+                let id = *id_counter;
+                *id_counter += 1;
+                let variant_name = format_ident!("{}{}", prefix, name);
+                flat_list.push((id, variant_name.clone()));
 
-    for i in 0..=count {
-        let name = format_ident!("handler_{}", i.to_string());
-        let is_error = error_code_indices.contains(&(i as i32));
-
-        // エラーコードがない例外は 0 を push して RawEntryArgs.error_code の位置を揃える
-        let push_zero = if is_error {
-            quote! { "", }
-        } else {
-            quote! { "push 0", }
-        };
-
-        handlers.extend(quote! {
-            #[unsafe(naked)]
-            pub unsafe extern "C" fn #name() {
-                core::arch::naked_asm!(
-                    "endbr64",
-                    #push_zero
-                    "push rax", "push rcx", "push rdx", "push rsi", "push rdi",
-                    "push r8", "push r9", "push r10", "push r11",
-
-                    "lea rdi, [rsp + 72]",
-                    "mov rsi, {idx}",
-
-                    "sub rsp, 40",
-                    "call {target}",
-                    "add rsp, 40",
-
-                    "pop r11", "pop r10", "pop r9", "pop r8",
-                    "pop rdi", "pop rsi", "pop rdx", "pop rcx", "pop rax",
-
-                    "add rsp, 8",
-                    "iretq",
-                    idx = const #i,
-                    target = sym #common_handler,
-                );
+                // 絶対パス的な解決を避けるため、super の連鎖ではなく
+                // 常に一つ上の flags モジュールから見える名前空間を利用する
+                quote! {
+                    pub const #name: super::CpuFlag =
+                        super::CpuFlag(super::InternalFlagKind::#variant_name);
+                }
             }
-        });
-        table_elements.extend(quote! { #name, });
-    }
+            FlagTree::Node(group) => {
+                let name = &group.name;
+                let new_prefix = format!("{}{}_", prefix, name);
+                let children: Vec<_> = group.body.iter()
+                    .map(|child| expand_tree(child, id_counter, flat_list, new_prefix.clone()))
+                    .collect();
 
-    quote! {
-        pub mod macro_idt {
-            use x86_64::structures::idt::{InterruptDescriptorTable, Entry, HandlerFunc};
-            use x86_64::VirtAddr;
-
-            #handlers
-
-            pub static IDT_METHODS: [unsafe extern "C" fn(); #count + 1] = [ #table_elements ];
-
-            pub fn init_all(idt: &mut InterruptDescriptorTable) {
-                let ptr = idt as *mut InterruptDescriptorTable as *mut Entry<HandlerFunc>;
-                for i in 0..=#count {
-                    let addr = VirtAddr::new(IDT_METHODS[i] as u64);
-                    unsafe {
-                        let mut entry = Entry::<HandlerFunc>::missing();
-                        entry.set_handler_addr(addr);
-                        core::ptr::write(ptr.add(i), entry);
+                quote! {
+                    pub mod #name {
+                        use super::*;
+                        #(#children)*
                     }
                 }
             }
         }
-    }.into()
+    }
+
+    let modules: Vec<_> = input.flags.iter()
+        .map(|f| expand_tree(f, &mut current_id, &mut flat_list, String::new()))
+        .collect();
+
+    let count = current_id as usize;
+    let num_u64 = (count + 63) / 64;
+
+    let internal_variants = flat_list.iter().map(|(id, variant_name)| {
+        quote! { #[allow(non_camel_case_types)] #variant_name = #id }
+    });
+
+    let match_arms = flat_list.iter().map(|(_id, variant_name)| {
+        quote! {
+            InternalFlagKind::#variant_name => raw_detect_flag_impl(InternalFlagKind::#variant_name)
+        }
+    });
+
+    let expanded = quote! {
+        #[repr(u32)]
+        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+        pub enum InternalFlagKind {
+            // Default 用に None または 最初の要素を確保
+            #(#internal_variants),*
+        }
+
+        // ThreadLocal 等で必要なため Default を実装
+        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+        pub struct CpuFlag(pub(crate) InternalFlagKind);
+
+        impl Default for CpuFlag {
+            fn default() -> Self {
+                // 最初のフラグをデフォルトとする（または InternalFlagKind に None を作るべきだが、
+                // 現状の構成に合わせて最初のバリアントを安全に指定）
+                unsafe { core::mem::transmute(0u32) }
+            }
+        }
+
+        impl CpuFlag {
+            pub const fn kind(&self) -> InternalFlagKind {
+                self.0
+            }
+        }
+
+        // フラグ定数の階層
+        pub mod flags {
+            use super::{CpuFlag, InternalFlagKind};
+            #(#modules)*
+        }
+
+        #[derive(Default)]
+        pub struct CpuFlagCache {
+            status: [core::sync::atomic::AtomicU64; #num_u64],
+            values: [core::sync::atomic::AtomicU64; #num_u64],
+        }
+
+        impl CpuFlagCache {
+            pub const fn new() -> Self {
+                const INIT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+                Self {
+                    status: [INIT; #num_u64],
+                    values: [INIT; #num_u64],
+                }
+            }
+
+            pub fn has(&self, flag: CpuFlag) -> bool {
+                let id = flag.0 as u32 as usize;
+                let index = id / 64;
+                let bit = id % 64;
+                let mask = 1u64 << bit;
+
+                let loaded = self.status[index].load(core::sync::atomic::Ordering::Acquire);
+                if (loaded & mask) != 0 {
+                    let vals = self.values[index].load(core::sync::atomic::Ordering::Relaxed);
+                    return (vals & mask) != 0;
+                }
+
+                let result = match flag.0 {
+                    #(#match_arms,)*
+                };
+
+                if result {
+                    self.values[index].fetch_or(mask, core::sync::atomic::Ordering::Relaxed);
+                } else {
+                    self.values[index].fetch_and(!mask, core::sync::atomic::Ordering::Relaxed);
+                }
+                self.status[index].fetch_or(mask, core::sync::atomic::Ordering::Release);
+                result
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
 }

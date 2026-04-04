@@ -1,4 +1,4 @@
 [toolchain]
 channel = "nightly"
-targets = ["x86_64-unknown-uefi"]
+targets = ["x86_64-unknown-uefi", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu"]
 components = ["rust-src", "llvm-tools"]

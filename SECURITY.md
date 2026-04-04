@@ -6,12 +6,12 @@
 * [ ] Versions explicitly stated as unsupported
 
 ## Reporting a Vulnerability
-Please contact us via email or PR.
+Please report vulnerabilities via my account email or GitHub Security Advisories.
 
-If the vulnerability is not easily exploitable, feel free to open an Issue.
+For non-critical issues, you may open an Issue or Pull Request.
 
-Even minor questions are welcome.
+We also welcome reports of minor issues or concerns.
 
-We will investigate and report the results to you.
+We will investigate the report and respond with our findings.
 
 Thank you.

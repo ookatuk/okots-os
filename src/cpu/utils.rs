@@ -1,209 +1,141 @@
-use crate::cpu::utils;
-use alloc::string::String;
-use core::arch::asm;
-use core::arch::x86_64::{CpuidResult, __cpuid_count};
+use alloc::boxed::Box;
+use core::hint::{cold_path, likely, unlikely};
+use spin::{Once};
+use crate::util::debug::with_interr;
+use x86_64::instructions::segmentation::{Segment, CS};
+use x86_64::instructions::tables::load_tss;
+use x86_64::registers::segmentation::SegmentSelector;
+use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable};
+use x86_64::structures::tss::TaskStateSegment;
+use x86_64::VirtAddr;
+use crate::cpu::cpu_id;
+use crate::thread_local::read_gs;
 
-#[derive(Debug, Clone)]
-pub enum CpuVendor {
-    Intel,
-    Amd,
-    Other,
+static CPU_VENDOR_CACHE: Once<[u8; 12]> = Once::new();
+
+pub mod vendor_list {
+    pub const INTEL: &[u8;12] = b"GenuineIntel";
+    pub const AMD: &[u8;12] = b"AuthenticAMD";
+    pub const VMWARE: &[u8; 12] = b"VMwareVMware";
+    pub const KVM: &[u8; 12] = b"KVMKVMKVMKVM";
+    pub const MICROSOFT_HYPER: &[u8; 12] = b"Microsoft Hv";
 }
 
-pub mod msr {
-    pub mod common {
-        pub const GS_BASE: u32 = 0xC0000101;
-        pub const KERNEL_GS_BASE: u32 = 0xC0000102;
+pub fn get_vendor_name_raw() -> Option<&'static [u8; 12]> {
+    let vendor = CPU_VENDOR_CACHE.call_once(|| {
+        cold_path();
+
+        let res = unsafe { cpu_id::read(0, None) };
+        let mut v = [0u8; 12];
+        v[0..4].copy_from_slice(&res.ebx.to_ne_bytes());
+        v[4..8].copy_from_slice(&res.edx.to_ne_bytes());
+        v[8..12].copy_from_slice(&res.ecx.to_ne_bytes());
+
+        v
+    });
+
+    if unlikely(core::str::from_utf8(vendor).is_err()) {
+        return None;
     }
 
-    #[cfg(target_arch = "x86_64")]
-    pub mod x64 {
-        pub mod intel {
-            pub const IA32_BIOS_SIGN_ID: u32 = 0x8B;
-            pub const IA32_BIOS_UPDT_TRIG: u32 = 0x79;
-            pub const IA32_PLATFORM_ID: u32 = 0x79;
-        }
-
-        pub mod amd {
-            pub const UCODE_PATCH_LOADER: u32 = 0xC001_0020;
-        }
-
-        pub mod v1 {
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v1 instead of common directly")]
-            pub use super::super::common::*;
-
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v1 instead of intel directly")]
-            pub use super::intel::*;
-
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v1 instead of amd directly")]
-            pub use super::amd::*;
-        }
-
-        pub mod v2 {
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v2 instead of v1 directly")]
-            pub use super::v1::*;
-        }
-
-        pub mod v3 {
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v3 instead of v2 directly")]
-            pub use super::v2::*;
-        }
-
-        pub mod v4 {
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v4 instead of v3 directly")]
-            pub use super::v3::*;
-        }
-    }
+    Some(vendor)
 }
-
-pub mod cpuid {
-    pub mod common {
-        /// Processor Info and Feature Bits
-        pub const PIAFB: u32 = 0x1;
-
-        /// Vendor ID and Largest Standard Function Number
-        pub const VIALSFN: u32 = 0x0;
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub mod x64 {
-        pub mod intel {}
-
-        pub mod amd {}
-
-        pub mod v1 {
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v1 instead of common directly")]
-            pub use super::super::common::*;
-
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v1 instead of intel directly")]
-            pub use super::intel::*;
-
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v1 instead of amd directly")]
-            pub use super::amd::*;
-        }
-
-        pub mod v2 {
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v2 instead of v1 directly")]
-            pub use super::v1::*;
-
-            pub const X2_APIC_ID: u32 = 0x0B;
-        }
-
-        pub mod v3 {
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v3 instead of v2 directly")]
-            pub use super::v2::*;
-        }
-
-        pub mod v4 {
-            #[allow(unused_imports)]
-            #[deprecated(note = "Use v4 instead of v3 directly")]
-            pub use super::v3::*;
-        }
-    }
-}
-
 #[inline]
-pub unsafe fn write_msr(target: u32, value: u64) {
-    unsafe {
-        asm!(
-            "wrmsr",
-            in("ecx") target,
-            in("eax") value & 0xFFFF_FFFF,
-            in("edx") value >> 32,
-            options(nostack, preserves_flags, nomem)
-        )
-    };
+pub fn get_vendor_name() -> Option<&'static str> {
+    Some(unsafe{str::from_utf8_unchecked(
+        get_vendor_name_raw()?
+    )})
 }
 
-#[inline]
-pub unsafe fn read_msr(msr: u32) -> u64 {
-    let (low, high): (u32, u32);
-    unsafe {
-        asm!(
-            "rdmsr",
-            in("ecx") msr,
-            out("eax") low,
-            out("edx") high,
-            options(nostack, preserves_flags, nomem)
-        )
-    };
-
-    ((high as u64) << 32) | (low as u64)
-}
-
-#[inline]
-pub unsafe fn cpuid(leaf: u32, sub_leaf: Option<u32>) -> CpuidResult {
-    __cpuid_count(leaf, sub_leaf.unwrap_or(0))
-}
-
-#[inline]
-pub unsafe fn get_vendor_name() -> String {
-    let res = unsafe { cpuid(cpuid::common::VIALSFN, None) };
-
-    let mut vendor = [0u8; 12];
-    vendor[0..4].copy_from_slice(&res.ebx.to_ne_bytes());
-    vendor[4..8].copy_from_slice(&res.edx.to_ne_bytes());
-    vendor[8..12].copy_from_slice(&res.ecx.to_ne_bytes());
-
-    String::from_utf8(vendor.to_vec()).unwrap()
-}
-
-#[inline]
-pub unsafe fn get_cpu_vendor() -> CpuVendor {
-    let res = unsafe { cpuid(cpuid::common::VIALSFN, None) };
-
-    match (res.ebx, res.edx, res.ecx) {
-        (0x756e6547, 0x49656e69, 0x6c65746e) => CpuVendor::Intel,
-        (0x68747541, 0x69746e65, 0x444d4163) => CpuVendor::Amd,
-        _ => CpuVendor::Other,
-    }
-}
-
-pub fn who_am_i() -> u32 {
-    let gs = crate::mem::thread_safe::get_mut();
-    if let Some(gs) = &gs
-        && gs.cpu_id != 0
-    {
-        return gs.cpu_id;
+pub fn who_am_i() -> Option<u32> {
+    let gs = crate::thread_local::read_gs()?;
+    if likely(gs.cpu_id != 0) {
+        return Some(gs.cpu_id);
     }
 
     let mut ret = 0;
+    let vendor = get_vendor_name_raw()?;
 
-    let res = unsafe { cpuid(cpuid::x64::v2::X2_APIC_ID, None) };
-    if res.ebx != 0 {
-        ret = res.edx;
+    if vendor == vendor_list::AMD {
+        let max_ext = unsafe { cpu_id::read(0x80000000, None).eax };
+        if max_ext >= 0x8000001E {
+            let res = unsafe { cpu_id::read(0x8000001E, None) };
+            ret = res.eax;
+        }
+    } else if vendor == vendor_list::INTEL {
+        let res = unsafe { cpu_id::read(0x0B, Some(0)) };
+        if res.edx != 0 {
+            ret = res.edx;
+        }
     }
 
     if ret == 0 {
-        let res = unsafe { cpuid(cpuid::common::PIAFB, None) };
+        let res = unsafe { cpu_id::read(1, None) };
         ret = (res.ebx >> 24) & 0xFF;
     }
 
-    if gs.is_some() {
-        unsafe { gs.unwrap_unchecked() }.cpu_id = ret;
-    }
-
-    ret
+    gs.cpu_id = ret;
+    Some(ret)
 }
 
-#[inline]
-pub unsafe fn get_reversion(typ: CpuVendor) -> u32 {
-    unsafe {
-        match typ {
-            CpuVendor::Intel => (utils::read_msr(0x8B) >> 32) as u32,
-            CpuVendor::Amd => utils::read_msr(0x8B) as u32,
-            _ => 0,
+fn make_gdt() -> GlobalDescriptorTable {
+    let mut gdt = GlobalDescriptorTable::new();
+    gdt.append(x86_64::structures::gdt::Descriptor::kernel_code_segment());
+    gdt.append(x86_64::structures::gdt::Descriptor::kernel_data_segment());
+    gdt.append(x86_64::structures::gdt::Descriptor::user_code_segment());
+    gdt.append(x86_64::structures::gdt::Descriptor::user_data_segment());
+
+    gdt
+}
+
+fn make_tss() -> TaskStateSegment {
+    let mut tss = TaskStateSegment::new();
+    let gs = read_gs().unwrap();
+
+    let stack_start_ptr = gs.idt_stack.data[0].get_addr() as *const u8;
+    let stack_start = VirtAddr::from_ptr(stack_start_ptr);
+
+    let stack_end = stack_start + 20480u64;
+
+    tss.interrupt_stack_table[crate::interrupt::raw::NMI_STACK_ADDR as usize] = stack_end;
+
+    let stack_start_ptr = gs.idt_stack.data[1].get_addr() as *const u8;
+    let stack_start = VirtAddr::from_ptr(stack_start_ptr);
+
+    let stack_end = stack_start + 20480u64;
+
+    tss.interrupt_stack_table[crate::interrupt::raw::DOUBLE_FAULT_STACK_ADDR as usize] = stack_end;
+
+    tss
+}
+
+pub fn make() -> (&'static mut GlobalDescriptorTable, SegmentSelector) {
+    let tss_ptr = Box::leak(Box::new(make_tss()));
+    let gdt_ptr = Box::leak(Box::new(make_gdt()));
+
+    let tss_desc = Descriptor::tss_segment(tss_ptr);
+
+    let tss_selector = gdt_ptr.append(tss_desc);
+
+    (gdt_ptr, tss_selector)
+}
+
+pub fn init_gdt() {
+    let (gdt_ptr, tss_selector) = make();
+
+    let code_selector = SegmentSelector::new(1, x86_64::PrivilegeLevel::Ring0);
+    let data_selector = SegmentSelector::new(2, x86_64::PrivilegeLevel::Ring0);
+
+    with_interr(|| {
+        gdt_ptr.load();
+
+        unsafe {
+            CS::set_reg(code_selector);
+            x86_64::instructions::segmentation::SS::set_reg(data_selector);
+            x86_64::instructions::segmentation::DS::set_reg(data_selector);
+            x86_64::instructions::segmentation::ES::set_reg(data_selector);
         }
-    }
+
+        unsafe{load_tss(tss_selector)};
+    });
 }
