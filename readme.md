@@ -62,7 +62,9 @@ We plan to specify the app version in YAML instead of XML!
 > ```bash
 > cargo make init_project
 > # or
-> ./init.(sh/bat)
+> ./init.sh
+> # or
+> ./init.bat
 > ```
 
 > [!TIP]
@@ -72,12 +74,21 @@ We plan to specify the app version in YAML instead of XML!
 
 > [!IMPORTANT]
 > Use sccache, or your SSD will scream.
-> 
+>
 > Each full build writes about 1.2GiB of data.
-> 
+>
 > To save your storage (and your sanity), we strongly recommend using sccache and moving the target folder to a temporary partition.
-> 
+>
 > We are currently seeking suggestions on how to address this issue.
+
+> [!WARNING]
+> **Microcode Notice**:
+> Microcode is prepared during the `cargo make init_project` phase, but it is **not** automatically updated or downloaded during runtime by the OS.
+>
+> If you need to manually refresh or fetch the latest microcode after the initial setup, use the following task:
+> ```bash
+> cargo make update_microcode
+> ```
 
 * If you need ISO:
 > Run:
@@ -89,15 +100,6 @@ We plan to specify the app version in YAML instead of XML!
 > Run:
 > ```bash
 > cargo build
-> ```
-
-> [!WARNING]
-> **Microcode Notice**:
-> Microcode is prepared during the `cargo make init_project` phase, but it is **not** automatically updated or downloaded during runtime by the OS.
->
-> If you need to manually refresh or fetch the latest microcode after the initial setup, use the following task:
-> ```bash
-> cargo make update_microcode
 > ```
 
 ## What is the `log_viewer`?
