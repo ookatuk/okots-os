@@ -6,6 +6,7 @@ use core::cmp::PartialEq;
 use core::hint::unlikely;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+use proc_bitfield::Bits;
 use rhai::CustomType;
 use x86::bits64::paging::{
     PAddr, PDEntry, PDFlags, PDPTEntry, PDPTFlags, PML4Entry, PML4Flags, PML5Entry, PML5Flags,
@@ -26,6 +27,11 @@ const RELAY_FLAGS: PageEntryFlags = PageEntryFlags::from_bits_retain(
         | PageEntryFlags::WRITABLE.bits()
         | PageEntryFlags::USER_PAGE.bits(),
 );
+
+const FLAGS_MASK: u64 = 0x8000_0000_0000_0FFF;
+const ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
+
+const CLEAN_RECREATE_FRAGMENT_LEVEL: usize = 512;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -522,6 +528,33 @@ pub fn update_paging(
 
     let mut buf: UpdatePagingResults  = Vec::new();
 
+    if top.page_fragmentation_level >= CLEAN_RECREATE_FRAGMENT_LEVEL {
+        let tmp_level = top.level.down().unwrap();
+
+        let tmp = create_page_table(
+            new_map_list,
+            new_flags,
+            allow_huge_at,
+            top.level
+        )?;
+
+        for (l, i) in tmp.ptr().iter().enumerate() {
+            if i.flags().contains(PageTableFlags::PRESENT) {
+                buf.push((unsafe { &mut *((i.addr().as_u64() + PHY_OFFSET as u64) as *mut PageTable) }, tmp_level));
+            }
+
+            top.ptr()[l] = i.clone();
+        }
+
+        unsafe{dealloc(
+            tmp.ptr() as *mut PageTable as *mut u8,
+            Layout::from_size_align_unchecked(4096, 4096)
+        )};
+        top.page_fragmentation_level = 0;
+
+        return Ok(buf);
+    }
+
      update_recursive(
         top.virt.as_u64() as usize,
         0,
@@ -530,6 +563,7 @@ pub fn update_paging(
         new_flags,
         allow_huge_at,
         &mut buf,
+        &mut 0
     )?;
 
     top.memory_mapping = (new_map_list.to_vec(), new_flags.to_vec());
@@ -551,6 +585,7 @@ fn update_recursive(
     flags: &Vec<PageEntryFlags>,
     allow_huge: PageLevel,
     tmp_vec: &mut UpdatePagingResults,
+    frlevel: &mut usize,
 ) -> result::Result<()> {
     fn generate_relay_entry(level: PageLevel, phys: u64) -> u64 {
         match level {
@@ -561,7 +596,6 @@ fn update_recursive(
             _ => 0,
         }
     }
-
 
     fn generate_huge_entry(level: PageLevel, vaddr: u64, flags: PageEntryFlags) -> u64 {
         match level {
@@ -594,14 +628,14 @@ fn update_recursive(
             }
         }
 
-        let old_entry = table[idx];
-        let old_present = (old_entry & 1) != 0;
-        let old_huge = (old_entry & (1 << 7)) != 0;
+        let current_entry = table[idx];
+        let is_present = (current_entry & 1) != 0;
+        let is_huge = (current_entry & (1 << 7)) != 0;
 
         if sub_map.is_empty() {
-            if old_present {
-                if !old_huge && level != PageLevel::Pt {
-                    let next_ptr = (old_entry & 0x000F_FFFF_FFFF_F000) + PHY_OFFSET as u64;
+            if is_present {
+                if !is_huge && level != PageLevel::Pt {
+                    let next_ptr = (current_entry & ADDR_MASK) + PHY_OFFSET as u64;
                     tmp_vec.push((unsafe{&mut *(next_ptr as *mut PageTable)}, level.down().unwrap()));
                 }
                 table[idx] = 0;
@@ -616,30 +650,58 @@ fn update_recursive(
             && sub_map[0].end() >= range_vend;
 
         if can_be_huge {
-            let new_entry = generate_huge_entry(level, range_vstart as u64, sub_flags[0]);
-            if old_entry != new_entry {
-                if old_present && !old_huge {
-                    let next_ptr = (old_entry & 0x000F_FFFF_FFFF_F000) + PHY_OFFSET as u64;
+            let target_entry = generate_huge_entry(level, range_vstart as u64, sub_flags[0]);
+            if current_entry != target_entry {
+                if is_present && !is_huge {
+                    let next_ptr = (current_entry & ADDR_MASK) + PHY_OFFSET as u64;
                     tmp_vec.push((unsafe{&mut *(next_ptr as *mut PageTable)}, level.down().unwrap()));
                 }
-                table[idx] = new_entry;
+                table[idx] = target_entry;
             }
             continue;
         }
 
         if let Some(next_level) = level.down() {
-            if old_present && !old_huge {
-                let next_ptr = (old_entry & 0x000F_FFFF_FFFF_F000) + PHY_OFFSET as u64;
-                update_recursive(next_ptr as usize, range_vstart, next_level, &sub_map, &sub_flags, allow_huge, tmp_vec)?;
+            if is_present && !is_huge {
+                let next_ptr = (current_entry & ADDR_MASK) + PHY_OFFSET as u64;
+                update_recursive(next_ptr as usize, range_vstart, next_level, &sub_map, &sub_flags, allow_huge, tmp_vec, frlevel)?;
                 table[idx] = generate_relay_entry(level, (next_ptr as u64) - PHY_OFFSET as u64);
             } else {
                 let next_ptr = create_recursive(range_vstart, next_level, &sub_map, &sub_flags, allow_huge)?;
                 table[idx] = generate_relay_entry(level, (next_ptr as u64) - PHY_OFFSET as u64);
             }
         } else if level == PageLevel::Pt {
-            let new_entry = PTEntry::new(PAddr::from(range_vstart as u64), sub_flags[0].to_ptf() | PTFlags::P).0;
-            table[idx] = new_entry;
+            table[idx] = PTEntry::new(PAddr::from(range_vstart as u64), sub_flags[0].to_ptf() | PTFlags::P).0;
         }
     }
+
+    if level <= allow_huge {
+        let first = table[0];
+        let first_present = (first & 1) != 0;
+        let first_huge = (first & (1 << 7)) != 0;
+
+        if first_present && (first_huge || level == PageLevel::Pt) {
+            let mut is_all_aligned = true;
+            let first_flags = first & FLAGS_MASK;
+            let first_base_addr = first & ADDR_MASK;
+
+            for i in 1..512 {
+                let entry = table[i];
+                let is_diff_attr = (entry & FLAGS_MASK) != first_flags;
+                let expected_addr = first_base_addr + (i as u64 * entry_size as u64);
+                let is_not_continuous = (entry & ADDR_MASK) != expected_addr;
+
+                if is_diff_attr || is_not_continuous {
+                    is_all_aligned = false;
+                    break;
+                }
+            }
+
+            if is_all_aligned {
+                *frlevel += 1;
+            }
+        }
+    }
+
     Ok(())
 }
