@@ -185,23 +185,37 @@ impl Main {
         self.change_allocator().expect("failed to enable os allocator.");
         log_info!("kernel", "info", "changed allocator.");
 
+        log_info!("kernel", "info", "exiting uefi boot services...");
+
         self.exit_uefi().expect("failed to exit uefi.");
+        log_info!("kernel", "info", "exited uefi boot services.");
 
+        log_info!("kernel", "info", "initializing acpi system...");
         acpi::core::get_acpi(unsafe{uefi::table::system_table_raw().unwrap().as_ref()}).expect("failed to get acpi.");
+        log_info!("kernel", "info", "initialized acpi system.");
 
+        log_info!("kernel", "info", "initializing interrupt system...");
         cpu::utils::init_gdt();
         interrupt::api::init();
+        log_info!("kernel", "info", "initialized interrupt system.");
 
+        log_info!("kernel", "info", "initializing lapic...");
         apic_helper::init_local_apic();
+        log_info!("kernel", "info", "initialized lapic.");
 
+        log_info!("kernel", "info", "initializing other cores...");
         self.init_ap();
+        log_info!("kernel", "info", "initialized other cores.");
 
         TSC.spin(Duration::from_micros(10));
 
+        log_info!("kernel", "info", "initializing async and multi-core system...");
         let exec = asy_nc::Executor::new().unwrap();
 
         let asy = Box::leak(Box::new(AsyncMain::new().unwrap()));
+        log_info!("kernel", "info", "initialized async and multi-core system.");
 
+        log_info!("kernel", "info", "running async kernel...");
         exec.spawn(AsyncMain::main(asy));
 
         exec.run();
@@ -211,6 +225,7 @@ impl Main {
         let mut len = with_interr(|| self.core_info.read().len());
 
         { // 起動
+            log_debug!("kernel", "multi-core", "Creating other aps stack...");
             let table = read_gs().unwrap().page_table.ptr();
 
             let mut stacks = Vec::with_capacity(len);
@@ -235,11 +250,13 @@ impl Main {
                 }).collect(),
                 vec![PageEntryFlags::PRESENT | PageEntryFlags::WRITABLE; stacks.len()],
             ).unwrap();
-
             stacks.push(1 as *mut u8);
+
+            log_debug!("kernel", "multi-core", "Created other aps stack.");
 
             unsafe { asm!("wbinvd", options(nomem, nostack)) };
 
+            log_debug!("kernel", "multi-core", "Initializing other required commands...");
             unsafe {
                 multi_core::init::raw::init_trampoline::<false>(
                     Self::ap_entry_point as *const () as u64,
@@ -253,13 +270,16 @@ impl Main {
                 read_gs().unwrap().page_table.memory_mapping.clone()
             });
 
+            log_debug!("kernel", "multi-core", "Initializing aps...");
             unsafe { broadcast_init_ipi_exc_self() };
             TSC.spin(Duration::from_millis(10));
             for _ in 0..2 {
                 unsafe { broadcast_ipi_exc_self(ICR_STARTUP, 0x08) };
                 TSC.spin(Duration::from_micros(200));
             }
+            log_debug!("kernel", "multi-core", "Initialized aps.");
 
+            log_debug!("kernel", "multi-core", "Initializing timers...");
             let start = TSC.get_time() + Duration::from_secs(1);
             with_interr(|| {
                 while self.initialized_core_count.load(Ordering::SeqCst) != len {
@@ -294,6 +314,8 @@ impl Main {
 
             self.initialized_core_count.store(0, Ordering::SeqCst);
         }
+
+        log_debug!("kernel", "multi-core", "Initialized timers.");
     }
 
     pub fn ap_entry_point() -> ! {
@@ -414,6 +436,7 @@ impl Main {
 
     fn init_timers(&'static self) -> result::Result {
         log_info!("kernel", "timer", "initialing tsc...");
+        log_debug!("kernel", "tip", "TSC represents CPU time, and includes UEFI boot time. (current tsc do: {})", Tsc::get());
         TSC.init_for_ap(uefi::boot::stall, Duration::from_millis(100));
         log_info!("kernel", "timer", "initialing tsc utc time...");
         let think_utc = RTC.sync_and_get_time();
@@ -472,7 +495,7 @@ impl Main {
         let map = unsafe{uefi_helper::boot::exit_boot_services_with_talc()};
         let map = self.uefi_map.call_once(|| {map});
 
-        log_info!("kernel", "memory", "creating memory map...");
+        log_info!("kernel", "memory", "creating custom uefi memory map...");
 
         let (mut t, mut r) = self.update_paging(&map)?;
 
