@@ -121,8 +121,8 @@ pub struct ImagePtr {
 }
 
 #[derive(Default, Debug)]
-pub struct GlobalData {
-    pm_data: Once<(Vec<MemRangeData<usize>>, Vec<PageEntryFlags>)>,
+pub struct GlobalData<'a> {
+    pm_data: Once<&'a TopPageTable>,
     timer: AtomicBool,
     value: AtomicU64
 }
@@ -133,7 +133,7 @@ struct Main {
     core_info: RwLock<Vec<u32>>,
     uefi_map: Once<MyMemoryMapOwned>,
     initialized_core_count: AtomicUsize,
-    global_data: GlobalData
+    global_data: GlobalData<'static>,
 }
 static MAIN_COPY: Once<&'static Main> = Once::new();
 static ASYNC_COPY: Once<&'static AsyncMain> = Once::new();
@@ -151,6 +151,8 @@ impl AsyncMain {
     }
 
     pub async fn main(&'static self) -> ! {
+        drivers::disk::virt_io::a();
+
         log_last!("kernel", "kernel", "leached last.");
         loop {
             pending().await
@@ -267,7 +269,7 @@ impl Main {
             }
 
             self.global_data.pm_data.call_once(|| {
-                read_gs().unwrap().page_table.memory_mapping.clone()
+                &read_gs().unwrap().page_table
             });
 
             log_debug!("kernel", "multi-core", "Initializing aps...");
@@ -328,13 +330,10 @@ impl Main {
         {
             unsafe { thread_local::write_none() };
             interrupt::api::init();
-            interrupts::enable();
+            enable();
 
-            let (mut a, mut b) = self.global_data.pm_data.get().unwrap().clone();
-            self.create_paging(
-                &mut a,
-                &mut b,
-            ).unwrap();
+            let data = self.global_data.pm_data.get().unwrap();
+            memory::paging::set_current(data);
         }
         let gs = read_gs().unwrap();
 
@@ -610,7 +609,7 @@ impl Main {
             if cpu_info!(environment::paging::PdptHuge) {PageLevel::Pdpt} else {PageLevel::Pd},
         )?;
 
-
+        unsafe{apic_helper::broadcast_fixed_ipi(33)};
 
         if FREE {
             unsafe{memory::paging::free_not_used_paging(res)}
