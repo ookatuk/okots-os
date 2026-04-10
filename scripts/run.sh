@@ -21,7 +21,7 @@ MEM=5120
 VARS_TMP=$(mktemp /tmp/ovmf_vars.XXXXXX.fd)
 cp "$VARS_SRC" "$VARS_TMP"
 
-trap 'rm -f "/dev/shm/serial_pipe.in" "/dev/shm/serial_pipe.out"'
+trap 'rm -f "/dev/shm/serial_pipe.in" "/dev/shm/serial_pipe.out"' EXIT
 
 mkfifo "/dev/shm/serial_pipe.in" "/dev/shm/serial_pipe.out"
 "$WORKSPACE_ROOT/bin/log_viewer" < "/dev/shm/serial_pipe.out" &
@@ -66,5 +66,3 @@ gdb-multiarch -ex "target remote :1234"
 wait $QEMU_PID
 wait $VIEWER_PID
 rm -f "$VARS_TMP"
-
-EXIT
