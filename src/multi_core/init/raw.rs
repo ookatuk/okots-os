@@ -19,7 +19,7 @@ const fn align_up(addr: usize, align: usize) -> usize {
 const TRAMP_TARGET: usize = 0x7500;
 
 
-pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &mut [*mut u8], uefi_map: &MyMemoryMapOwned, pt: &PageTable) -> result::Result {
+pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &mut [*mut u8], uefi_map: &MyMemoryMapOwned, _pt: &PageTable) -> result::Result {
     #[cfg(feature = "enable_normal_safety_checks")]
     for (l, st) in stack.iter().enumerate() {
         let is_aligned = st.addr().is_multiple_of(16);

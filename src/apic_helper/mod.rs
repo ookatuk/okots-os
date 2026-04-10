@@ -7,7 +7,7 @@
 
 use x86_64::structures::idt::InterruptStackFrame;
 use crate::cpu::msr;
-use crate::{cpu_info, deb, log_error};
+use crate::{cpu_info, log_error};
 
 const IA32_APIC_BASE_MSR: u32 = 0x1B;
 const X2APIC_MSR_BASE: u32 = 0x800;
@@ -123,12 +123,14 @@ pub unsafe fn send_eoi() {
 /// * In xAPIC mode, this involves two separate writes to the ICR. This operation is not atomic.
 pub unsafe fn send_fixed_ipi(apic_id: u32, vector: u8) {
     let cmd = ICR_FIXED | ICR_ASSERT | (vector as u64);
-    if is_x2apic_active() {
-        let icr_value = ((apic_id as u64) << 32) | cmd;
-        msr::write(X2APIC_MSR_ICR, icr_value);
-    } else {
-        write_apic(APIC_REG_ICR_HIGH, apic_id << 24);
-        write_apic(APIC_REG_ICR_LOW, cmd as u32);
+    unsafe {
+        if is_x2apic_active() {
+            let icr_value = ((apic_id as u64) << 32) | cmd;
+            msr::write(X2APIC_MSR_ICR, icr_value);
+        } else {
+            write_apic(APIC_REG_ICR_HIGH, apic_id << 24);
+            write_apic(APIC_REG_ICR_LOW, cmd as u32);
+        }
     }
 }
 
@@ -139,11 +141,13 @@ pub unsafe fn send_fixed_ipi(apic_id: u32, vector: u8) {
 /// * Sending an INIT IPI to the BSP or an already running CPU can cause a system crash.
 pub unsafe fn send_init_ipi(apic_id: u32) {
     let cmd = ICR_INIT | ICR_ASSERT;
-    if is_x2apic_active() {
-        msr::write(X2APIC_MSR_ICR, ((apic_id as u64) << 32) | cmd);
-    } else {
-        write_apic(APIC_REG_ICR_HIGH, apic_id << 24);
-        write_apic(APIC_REG_ICR_LOW, cmd as u32);
+    unsafe {
+        if is_x2apic_active() {
+            msr::write(X2APIC_MSR_ICR, ((apic_id as u64) << 32) | cmd);
+        } else {
+            write_apic(APIC_REG_ICR_HIGH, apic_id << 24);
+            write_apic(APIC_REG_ICR_LOW, cmd as u32);
+        }
     }
 }
 
@@ -154,11 +158,13 @@ pub unsafe fn send_init_ipi(apic_id: u32) {
 /// * This must be sent after a successful INIT IPI sequence.
 pub unsafe fn send_sipi(apic_id: u32, vector: u8) {
     let cmd = ICR_STARTUP | (vector as u64);
-    if is_x2apic_active() {
-        msr::write(X2APIC_MSR_ICR, ((apic_id as u64) << 32) | cmd);
-    } else {
-        write_apic(APIC_REG_ICR_HIGH, apic_id << 24);
-        write_apic(APIC_REG_ICR_LOW, cmd as u32);
+    unsafe {
+        if is_x2apic_active() {
+            msr::write(X2APIC_MSR_ICR, ((apic_id as u64) << 32) | cmd);
+        } else {
+            write_apic(APIC_REG_ICR_HIGH, apic_id << 24);
+            write_apic(APIC_REG_ICR_LOW, cmd as u32);
+        }
     }
 }
 
@@ -217,7 +223,7 @@ pub fn init_local_apic() {
 pub unsafe fn broadcast_init_ipi_exc_self() {
     let delivery_mode = ICR_INIT | ICR_LEVEL_ASSERT;
 
-    broadcast_ipi_exc_self(delivery_mode, 0);
+    unsafe{broadcast_ipi_exc_self(delivery_mode, 0)};
 }
 
 /// Broadcasts an IPI to all CPUs excluding the current one.
@@ -228,14 +234,16 @@ pub unsafe fn broadcast_init_ipi_exc_self() {
 pub unsafe fn broadcast_ipi_exc_self(mode_flags: u64, vector: u8) {
     let cmd = ICR_DEST_ALL_EXC_SELF | mode_flags | (vector as u64);
 
-    if is_x2apic_active() {
-        msr::write(X2APIC_MSR_ICR, cmd);
-    } else {
-        write_apic(APIC_REG_ICR_HIGH, 0);
-        write_apic(APIC_REG_ICR_LOW, cmd as u32);
+    unsafe {
+        if is_x2apic_active() {
+            msr::write(X2APIC_MSR_ICR, cmd);
+        } else {
+            write_apic(APIC_REG_ICR_HIGH, 0);
+            write_apic(APIC_REG_ICR_LOW, cmd as u32);
 
-        while (read_apic(APIC_REG_ICR_LOW) & (1 << 12)) != 0 {
-            core::hint::spin_loop();
+            while (read_apic(APIC_REG_ICR_LOW) & (1 << 12)) != 0 {
+                core::hint::spin_loop();
+            }
         }
     }
 }

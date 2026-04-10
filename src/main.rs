@@ -64,10 +64,9 @@ use uefi::mem::memory_map::MemoryMap;
 use uefi::table::set_system_table;
 use uefi_raw::table::boot::{MemoryType, PAGE_SIZE};
 use x86_64::instructions::{hlt, interrupts};
-use x86_64::instructions::interrupts::{disable, enable, int3};
-use x86_64::structures::paging::PageTable;
-use crate::apic_helper::{broadcast_init_ipi_exc_self, broadcast_ipi_exc_self, send_init_ipi, send_sipi, ICR_STARTUP};
-use crate::asy_nc::{pending, yield_now};
+use x86_64::instructions::interrupts::{enable};
+use crate::apic_helper::{broadcast_init_ipi_exc_self, broadcast_ipi_exc_self, ICR_STARTUP};
+use crate::asy_nc::{pending};
 use crate::util::debug::with_interr;
 use crate::cpu::cpu_id;
 use crate::cpu::utils::{get_vendor_name_raw, vendor_list};
@@ -79,6 +78,8 @@ use crate::timer::tsc::{Tsc, TSC};
 use crate::uefi_helper::boot::MyMemoryMapOwned;
 use crate::util::proto;
 use crate::util_types::MemRangeData;
+#[cfg(not(test))]
+use x86_64::instructions::interrupts::disable;
 
 mod io;
 mod manager;
@@ -138,7 +139,7 @@ static MAIN_COPY: Once<&'static Main> = Once::new();
 static ASYNC_COPY: Once<&'static AsyncMain> = Once::new();
 
 #[derive(Debug)]
-pub struct AsyncMain {
+struct AsyncMain {
     pub non_async_main: &'static &'static Main,
 }
 
@@ -241,7 +242,7 @@ impl Main {
 
             unsafe {
                 multi_core::init::raw::init_trampoline::<false>(
-                    Self::ap_entry_point as u64,
+                    Self::ap_entry_point as *const () as u64,
                     stacks.as_mut_slice(),
                     self.uefi_map.get().unwrap(),
                     table

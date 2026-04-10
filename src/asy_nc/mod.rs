@@ -4,11 +4,10 @@ use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::future::Future;
-use core::hint::spin_loop;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-use crate::{deb, log_last, result};
+use crate::{result};
 use core::time::Duration;
 use spin::Mutex;
 use spin::rwlock::RwLock;
@@ -69,7 +68,7 @@ pub fn pending<T>() -> Pending<T> {
 
 #[derive(Default)]
 pub struct CoreExecutor {
-    pub task_queue: Arc<Mutex<VecDeque<Arc<Task>>>>,
+    task_queue: Arc<Mutex<VecDeque<Arc<Task>>>>,
     pub tickets: Arc<Mutex<BTreeMap<Duration, Vec<Waker>>>>,
 }
 
