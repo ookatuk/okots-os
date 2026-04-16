@@ -4,9 +4,8 @@
 #![feature(portable_simd)]
 #![feature(const_trait_impl)]
 #![feature(abi_x86_interrupt)]
-
 #![feature(generic_const_exprs)]
-
+#![feature(try_trait_v2)]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
@@ -28,7 +27,7 @@ const OS_NAME: &str = "okots";
 const DEBUG_PROTOCOL_VERSION: &str = "2.0";
 #[allow(unused)]
 const PANICED_TO_RESTART_TIME: usize = 20;
-const STACK_SIZE: usize = 1024 * 32;
+const STACK_SIZE: usize = 1024 * 64;
 const ALLOCATOR_FIRST_CREATE_SIZE_OPTION_MAX_ALLOCATE_SIZE: usize = 1024 * 1024 * 1024 * 2;
 const ALLOCATOR_FIRST_CREATE_SIZE_OPTION_MIN_ALLOCATE_SIZE: usize = 4096 * 2;
 
@@ -36,6 +35,8 @@ const ALLOCATOR_ADD_OFFSET: usize = 0x10000;
 
 #[allow(unused)]
 const POSITION_VALUE: u8 = 0x2F;
+
+static ALLOW_STOP_IPI: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "C" {
     pub static __ImageBase: u8;
@@ -56,8 +57,10 @@ use core::alloc::Layout;
 use core::arch::{asm, naked_asm};
 use core::ffi::c_void;
 use core::hint::{spin_loop};
+use core::str::FromStr;
 use core::sync::atomic::AtomicUsize;
 use core::time::Duration;
+use ::acpi::aml::namespace::AmlName;
 use spin::{Once, RwLock};
 use uefi::boot::{set_image_handle, AllocateType};
 use uefi::mem::memory_map::MemoryMap;
@@ -80,6 +83,7 @@ use crate::util::proto;
 use crate::util_types::MemRangeData;
 #[cfg(not(test))]
 use x86_64::instructions::interrupts::disable;
+use crate::result::{ErrorType, Wirt};
 
 pub mod io;
 pub mod manager;
@@ -96,7 +100,7 @@ pub mod cpu;
 pub mod cpu_flags;
 pub mod acpi;
 pub mod timer;
-pub mod send_and_get;
+pub mod app_ffi;
 pub mod drivers;
 pub mod interrupt;
 pub mod multi_core;
@@ -158,7 +162,84 @@ impl AsyncMain {
     }
 
     pub async fn main(&'static self) -> ! {
-        drivers::disk::virt_io::a().await;
+        {
+            let data = acpi::aml::get_dsdt().unwrap();
+            let mut lock = data.lock();
+
+            let mut data = Vec::new();
+
+            {
+                let mut paths = Vec::new();
+
+                let _ = lock.namespace.lock().traverse(|name, level| {
+                    if name.to_string() == "\\_SB_" {
+                        'outer: for (key, val) in level.children.iter() {
+                            if key.as_str().starts_with("PC") {
+                                for (v_key, v_val) in val.values.iter() {
+                                    if v_key.as_str() == "_CRS" {
+                                        data.push(v_val.1.clone());
+                                        continue 'outer;
+                                    }
+                                }
+                                paths.push(format!("\\_SB_.{}", key.as_str()));
+                            }
+                        }
+                        return Ok(false);
+                    }
+                    Ok(true)
+                });
+
+                for path in paths {
+                    let res = lock.evaluate_if_present(AmlName::from_str(&path).unwrap(), Vec::new()).unwrap();
+                    data.push(res.unwrap());
+                }
+            }
+
+            for obj in data {
+                if let Ok(bytes) = obj.as_buffer() {
+                    let mut pos = 0;
+                    while pos < bytes.len() {
+                        let tag = bytes[pos];
+                        if tag == 0x79 { break; }
+
+                        let (length, tag_size) = if tag & 0x80 == 0 {
+                            ((tag & 0x07) as usize, 1)
+                        } else {
+                            (u16::from_le_bytes(bytes[pos+1..pos+3].try_into().unwrap()) as usize, 3)
+                        };
+
+                        if tag == 0x87 && bytes[pos + 3] == 0 {
+                            let min = u32::from_le_bytes(bytes[pos+10..pos+14].try_into().unwrap());
+                            let max = u32::from_le_bytes(bytes[pos+14..pos+18].try_into().unwrap());
+                            deb!("Found 32-bit MMIO: 0x{:X} - 0x{:X}", min, max);
+                        }
+                        else if tag == 0x88 && bytes[pos + 3] == 0 {
+                            let min = u64::from_le_bytes(bytes[pos+14..pos+22].try_into().unwrap());
+                            let max = u64::from_le_bytes(bytes[pos+22..pos+30].try_into().unwrap());
+                            deb!("Found 64-bit MMIO: 0x{:X} - 0x{:X}", min, max);
+                        } else if tag == 0x8A {
+                            if length >= 50 {
+                                let res_type = bytes[pos + 3];
+                                let gen_flags = bytes[pos + 4];
+
+                                if res_type == 0 {
+                                    let min = u64::from_le_bytes(bytes[pos+16..pos+24].try_into().unwrap());
+                                    let max = u64::from_le_bytes(bytes[pos+24..pos+32].try_into().unwrap());
+                                    let len = u64::from_le_bytes(bytes[pos+40..pos+48].try_into().unwrap());
+
+                                    if len > 0 && max >= min {
+                                        deb!("Found Valid Extended MMIO: 0x{:X} - 0x{:X} (len: 0x{:X})", min, max, len);
+                                    }
+                                }
+                            }
+                        }
+
+                        pos += tag_size + length;
+                    }
+                }
+            }
+
+        }
 
         log_last!("kernel", "kernel", "leached last.");
         loop {
@@ -302,6 +383,8 @@ impl Main {
             self.initialized_core_count.store(0, Ordering::SeqCst);
         }
 
+        ALLOW_STOP_IPI.store(true, Ordering::SeqCst);
+
         {  // タイマー設定
             self.global_data.value.store(0, Ordering::SeqCst);
 
@@ -390,7 +473,7 @@ impl Main {
         exec.run();
     }
 
-    fn get_core_info(&'static self) -> result::Result {
+    fn get_core_info(&'static self) -> Wirt {
         extern "efiapi" fn internal(a: *mut c_void) {
             let me = unsafe { &*(a as *const Main) };
 
@@ -435,12 +518,12 @@ impl Main {
             self as *const Self as *const c_void as *mut c_void,
             None,
             None
-        )?;
+        ).unwrap();
 
-        Ok(())
+        Wirt::Ok(())
     }
 
-    fn init_timers(&'static self) -> result::Result {
+    fn init_timers(&'static self) -> Wirt {
         log_info!("kernel", "timer", "initialing tsc...");
         log_debug!("kernel", "tip", "TSC represents CPU time, and includes UEFI boot time. (current tsc do: {})", Tsc::get());
         TSC.init_for_ap(uefi::boot::stall, Duration::from_millis(100));
@@ -448,10 +531,10 @@ impl Main {
         let think_utc = RTC.sync_and_get_time();
         TSC.option_init_time_stamp(think_utc);
 
-        Ok(())
+        Wirt::Ok(())
     }
 
-    fn update_paging(&'static self, map: &MyMemoryMapOwned) -> result::Result<(Vec<MemRangeData<usize>>, Vec<PageEntryFlags>)> {
+    fn update_paging(&'static self, map: &MyMemoryMapOwned) -> Wirt<(Vec<MemRangeData<usize>>, Vec<PageEntryFlags>)> {
         let last = map.iter()
             .map(|e| e.phys_start as usize + e.page_count as usize * PAGE_SIZE)
             .max()
@@ -494,10 +577,10 @@ impl Main {
         t.push(MemRangeData::new(0, 4096));
         r.push(PageEntryFlags::empty());
 
-        Ok((t, r))
+        Wirt::Ok((t, r))
     }
 
-    fn exit_uefi(&'static self) -> result::Result {
+    fn exit_uefi(&'static self) -> Wirt {
         let map = unsafe{uefi_helper::boot::exit_boot_services_with_talc()};
         let map = self.phys_mem_info.phys_map_uefi.call_once(|| {map});
 
@@ -535,12 +618,12 @@ impl Main {
         log_info!("kernel", "memory", "added other free memory.");
 
 
-        Ok(())
+        Wirt::Ok(())
     }
 
-    fn change_allocator(&'static self) -> result::Result {
+    fn change_allocator(&'static self) -> Wirt {
         let mut current_attempt_size = ALLOCATOR_FIRST_CREATE_SIZE_OPTION_MAX_ALLOCATE_SIZE.min({
-            let map = uefi::boot::memory_map(MemoryType::LOADER_DATA)?;
+            let map = uefi::boot::memory_map(MemoryType::LOADER_DATA).unwrap();
             let mut value = 0;
 
             for i in map.entries() {
@@ -580,14 +663,14 @@ impl Main {
 
             log_custom!("s", "ds", "am", "{}", data);
         });
-        Ok(())
+        Wirt::Ok(())
     }
 
     fn util_update_paging<const FREE: bool>(
         &'static self,
         map_list: &mut Vec<MemRangeData<usize>>,
         flags: &mut Vec<PageEntryFlags>,
-    ) -> result::Result {
+    ) -> Wirt {
         let nx_mask = !PageEntryFlags::EXECUTE_DISABLE;
 
         let mut i = 0;
@@ -622,14 +705,14 @@ impl Main {
             unsafe{memory::paging::free_not_used_paging(res)}
         };
 
-        Ok(())
+        Wirt::Ok(())
     }
 
     fn create_paging(
         &'static self,
         map_list: &mut Vec<MemRangeData<usize>>,
         flags: &mut Vec<PageEntryFlags>,
-    ) -> result::Result {
+    ) -> Wirt {
         let nx_mask = !PageEntryFlags::EXECUTE_DISABLE;
 
         let mut i = 0;
@@ -660,12 +743,12 @@ impl Main {
 
         read_gs().unwrap().page_table = res;
 
-        Ok(())
+        Wirt::Ok(())
     }
 
     fn clone_paging(
         &'static self,
-    ) -> result::Result<TopPageTable> {
+    ) -> Wirt<TopPageTable> {
         let nx_mask = !PageEntryFlags::EXECUTE_DISABLE;
 
         let old = &read_gs().unwrap().page_table.memory_mapping;
@@ -698,14 +781,14 @@ impl Main {
             if cpu_info!(current::paging::Pml5) {PageLevel::Pml5} else {PageLevel::Pml4},
         )?;
 
-        Ok(res)
+        Wirt::Ok(res)
     }
 
     pub fn util_update_add_paging<const FREE: bool>(
         &'static self,
         mut map_list: Vec<MemRangeData<usize>>,
         mut flags: Vec<PageEntryFlags>
-    ) -> result::Result {
+    ) -> Wirt {
         let old = &read_gs().unwrap().page_table.memory_mapping;
 
         let mut map = old.0.clone();
@@ -719,12 +802,14 @@ impl Main {
 }
 
 pub mod _internal_init {
-    use crate::{io, log_custom, log_info, thread_local, Main, DEBUG_PROTOCOL_VERSION, STACK_SIZE};
+    use crate::{deb, io, log_custom, log_info, thread_local, Main, DEBUG_PROTOCOL_VERSION, STACK_SIZE};
     use core::alloc::Layout;
     use core::ptr;
     use uefi::runtime;
 
     use core::arch::asm;
+    use core::sync::atomic::Ordering;
+    use crate::result::Wirt;
     use crate::util::proto;
     use crate::version::OS_VERSION;
 
@@ -739,7 +824,7 @@ pub mod _internal_init {
     pub fn get_boot_entropy() -> usize {
         let mut entropy: usize = 0;
 
-        if let Ok(mut rng_proto) = proto::open::<uefi::proto::rng::Rng>(None) {
+        if let Some(mut rng_proto) = proto::open::<uefi::proto::rng::Rng>(None).ok() {
             let mut buf = [0u8; size_of::<usize>()];
             if rng_proto.get_rng(None, &mut buf).is_ok() {
                 entropy = usize::from_le_bytes(buf);
@@ -761,6 +846,8 @@ pub mod _internal_init {
         unsafe {
             core::arch::asm!("int3");
         }
+
+        crate::logger::core::ALLOW_LOGGING.store(true, Ordering::Relaxed);
 
         log_custom!("s", "ds", "a", "");
         log_custom!(
@@ -923,13 +1010,13 @@ fn panic(info: &PanicInfo) -> ! {
     log_last!(
         "kernel",
         "panic",
-        "A critical system error has occurred. {}for system admin: (info: {}, by: {})",
+        "A critical system error has occurred. {}",
         tmp_text,
-        info.message(),
-        info.location().unwrap()
     );
 
-    unsafe{apic_helper::broadcast_fixed_ipi(32)}
+    if ALLOW_STOP_IPI.load(Ordering::SeqCst) {
+        unsafe { apic_helper::broadcast_fixed_ipi(32) }
+    }
 
     loop {
         hlt();

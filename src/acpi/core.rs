@@ -5,8 +5,7 @@ use uefi_raw::table::system::SystemTable;
 
 use uefi::guid;
 use crate::acpi::handler::TmpHandler;
-use crate::{result};
-use crate::result::{Error, ErrorType};
+use crate::result::{ErrorType, Wirt};
 
 /// temp acpi table handler
 pub static ACPI_TABLE_TMP_HANDLER: Once<AcpiTables<TmpHandler>> = Once::new();
@@ -31,7 +30,7 @@ const ACPI_10_TABLE_GUID: Guid = guid!("eb9d2d30-2d88-11d3-9a16-0090273fc14d");
 ///
 /// assert!(ACPI_TABLE_TMP_HANDLER.completed()); // Initialized
 /// ```
-pub fn get_acpi(st: &SystemTable) -> result::Result<()> {
+pub fn get_acpi(st: &SystemTable) -> Wirt {
     let tables = unsafe {
         core::slice::from_raw_parts(
             st.configuration_table,
@@ -54,17 +53,17 @@ pub fn get_acpi(st: &SystemTable) -> result::Result<()> {
         }
     }
 
-    let test = Error::from_option(test, Some(ErrorType::NotFound), Some("Rsdp not found"))?;
+    let test = Wirt::from_option(test, ErrorType::NotFound, Some("Rsdp not found"))?;
 
     let res = unsafe {
         let a = TmpHandler::new();
 
-        Error::try_raise(
+        Wirt::try_raise_acpi(
             AcpiTables::from_rsdp(a, test.addr()),
             Some("Rsdp not found"),
         )?
     };
 
     ACPI_TABLE_TMP_HANDLER.call_once(|| {res});
-    Ok(())
+    Wirt::Ok(())
 }

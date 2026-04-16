@@ -8,7 +8,7 @@ use uefi_raw::table::boot::MemoryType;
 use x86_64::registers::control::{Cr3, Cr4};
 use x86_64::structures::paging::PageTable;
 use crate::memory::paging::PageEntryFlags;
-use crate::result::{Error, ErrorType};
+use crate::result::{ErrorType, Wirt};
 use crate::uefi_helper::boot::MyMemoryMapOwned;
 use crate::util_types::MemRangeData;
 
@@ -19,7 +19,7 @@ const fn align_up(addr: usize, align: usize) -> usize {
 const TRAMP_TARGET: usize = 0x7500;
 
 
-pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &mut [*mut u8], uefi_map: &MyMemoryMapOwned, _pt: &PageTable) -> result::Result {
+pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &mut [*mut u8], uefi_map: &MyMemoryMapOwned, _pt: &PageTable) -> Wirt {
     #[cfg(feature = "enable_normal_safety_checks")]
     for (l, st) in stack.iter().enumerate() {
         let is_aligned = st.addr().is_multiple_of(16);
@@ -29,7 +29,7 @@ pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &
         let is_ok = is_aligned || (is_last_entry && is_canary);
 
         if st.is_null() || !is_ok {
-            return Error::new(ErrorType::InvalidArgument, Some("stack pointer is invalid.")).raise();
+            return Wirt::Err(ErrorType::InvalidArgument, Some("stack pointer is invalid."));
         }
     }
 
@@ -43,10 +43,10 @@ pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &
         }
 
         if !ok {
-            return Error::new(
+            return Wirt::Err(
                 ErrorType::InvalidArgument,
                 Some("stack last item is need 0x1.")
-            ).raise();
+            );
         }
     }
 
@@ -86,10 +86,10 @@ pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &
 
         if mem_start < tramp_end && tramp_start < mem_end {
             if i.ty == MemoryType::RUNTIME_SERVICES_CODE || i.ty == MemoryType::RUNTIME_SERVICES_DATA {
-                return Error::new(
+                return Wirt::Err(
                     ErrorType::AllocationFailed,
                     Some("The location for the trampoline code is already in use.")
-                ).raise();
+                );
             }
         }
     }
@@ -100,20 +100,20 @@ pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &
         let end = crate::memory::paging::get_addr(VirtAddr::new((TRAMP_TARGET + len) as u64));
 
         if start.is_err() || end.is_err() {
-            return Error::new(
+            return Wirt::Err(
                 ErrorType::InvalidData,
                 Some("Mapping is required.")
-            ).raise();
+            );
         }
 
         let start = start?;
         let end = end?;
 
         if TRAMP_TARGET != start.as_u64() as usize || TRAMP_TARGET + len != end.as_u64() as usize {
-            return Error::new(
+            return Wirt::Err(
                 ErrorType::NotSupported,
                 Some("The scope of influence must be a 1:1 mapping.")
-            ).raise();
+            );
         }
     }
 
@@ -128,10 +128,10 @@ pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &
             args_ptr.frarg.addr() == 0x95 &&
             args_ptr.flags        == 0b10) ||
             args_ptr.safety       == 0x54855fafb595ad) {
-            return Error::new(
+            return Wirt::Err(
                 ErrorType::InternalError,
                 Some("It has already been created.")
-            ).raise();
+            );
         }
     }
 
@@ -152,10 +152,10 @@ pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &
                 args_ptr.frarg.addr() == 0x95 &&
                 args_ptr.flags        == 0b10) &&
                 args_ptr.safety       == 0x54855fafb595ad) {
-            return Error::new(
+            return Wirt::Err(
                 ErrorType::InternalError,
                 Some("The health check failed.")
-            ).raise();
+            );
         }
     }
 
@@ -168,7 +168,7 @@ pub unsafe fn init_trampoline<const OVER_WRITE: bool>(entry_point: u64, stack: &
     args_ptr.tmp_table = Cr3::read().0.start_address().as_u64() as *const PageTable;
     args_ptr.cr4 = Cr4::read().bits();
 
-    Ok(())
+    Wirt::Ok(())
 }
 
 #[repr(C, align(16))]

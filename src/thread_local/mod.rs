@@ -64,6 +64,10 @@ pub fn read_gs() -> Option<&'static mut ThreadLocalStorage<'static>> {
         );
     }
 
+    if value.is_null() {
+        return None;
+    }
+
     Some(unsafe{&mut *value})
 }
 

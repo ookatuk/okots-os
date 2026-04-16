@@ -16,8 +16,7 @@ use x86::tlb::flush_all;
 use x86_64::registers::control::{Cr3, Cr3Flags, Cr4, Cr4Flags};
 use x86_64::structures::paging::{PageTable, PageTableFlags, PhysFrame};
 use x86_64::{PhysAddr, VirtAddr};
-use crate::{result};
-use crate::result::{Error, ErrorType};
+use crate::result::{ErrorType, Wirt};
 use crate::util_types::MemRangeData;
 
 pub const PHY_OFFSET: usize = 0;
@@ -194,24 +193,22 @@ pub fn create_page_table(
     flags: &mut Vec<PageEntryFlags>,
     allow_huge_at: PageLevel,
     target: PageLevel,
-) -> result::Result<TopPageTable> {
+) -> Wirt<TopPageTable> {
     #[cfg(feature = "enable_normal_safety_checks")]
     {
         if map_list.len() != flags.len() {
-            return Error::new(
+            return Wirt::Err(
                 ErrorType::InvalidData,
                 Some("map_list length is not eq to flags"),
-            )
-                .raise();
+            );
         };
 
         for i in map_list.iter() {
             if !i.len().is_multiple_of(4096) || !i.start().is_multiple_of(4096) {
-                return Error::new(
+                return Wirt::Err(
                     ErrorType::InvalidData,
                     Some("map data align/size align is need 4096, but not 4096"),
-                )
-                    .raise();
+                );
             }
         }
     }
@@ -226,10 +223,10 @@ pub fn create_page_table(
                 PhysAddr::new(table_addr as u64 - PHY_OFFSET as u64),
             )
         }
-        _ => return Error::new(ErrorType::InvalidData, Some("Invalid target level")).raise(),
+        _ => return Wirt::Err(ErrorType::InvalidData, Some("Invalid target level")),
     };
 
-    Ok(TopPageTable {
+    Wirt::Ok(TopPageTable {
         phys,
         virt: VirtAddr::new(phys.as_u64() + PHY_OFFSET as u64),
         level: target,
@@ -255,12 +252,12 @@ fn create_recursive(
     map_list: &Vec<MemRangeData<usize>>,
     flags: &Vec<PageEntryFlags>,
     allow_huge: PageLevel,
-) -> result::Result<usize> {
+) -> Wirt<usize> {
     let layout = Layout::from_size_align(4096, 4096).unwrap();
     let table_ptr = unsafe {
         let p = alloc::alloc::alloc_zeroed(layout);
         if p.is_null() {
-            return Error::new(ErrorType::AllocationFailed, Some("Allocation failed")).raise();
+            return Wirt::Err(ErrorType::AllocationFailed, Some("Allocation failed"));
         }
         p as *mut u64
     };
@@ -272,20 +269,18 @@ fn create_recursive(
         #[cfg(feature = "enable_overprotective_safety_checks")]
         {
             if map_list.len() != flags.len() {
-                return Error::new(
+                return Wirt::Err(
                     ErrorType::InvalidData,
                     Some("map_list length is not eq to flags"),
-                )
-                    .raise();
+                );
             };
 
             for i in map_list {
                 if !i.len().is_multiple_of(4096) || !i.start().is_multiple_of(4096) {
-                    return Error::new(
+                    return Wirt::Err(
                         ErrorType::InvalidData,
                         Some("map data align/size align is need 4096, but not 4096"),
-                    )
-                        .raise();
+                    );
                 }
             }
         }
@@ -341,18 +336,15 @@ fn create_recursive(
         } else if let Some(next_level) = level.down() {
             let next_table =
                 {
-                    let a = create_recursive(range_vstart, next_level, &sub_map, &sub_flags, allow_huge);
+                    let mut a = create_recursive(range_vstart, next_level, &sub_map, &sub_flags, allow_huge);
                     if unlikely(a.is_err()) {
-                        unsafe{alloc::alloc::dealloc(
+                        unsafe{dealloc(
                             table_ptr as *mut u8,
                             layout
                         )}
 
-                        let err = a.err().unwrap();
-                        return Error::try_raise(
-                            Err(err),
-                            Some("failed to create recursive")
-                        );
+                        a.log();
+                        return a;
                     }
                     unsafe{a.unwrap_unchecked()}
                 };
@@ -397,7 +389,7 @@ fn create_recursive(
         }
     }
 
-    Ok(table_ptr as usize)
+    Wirt::Ok(table_ptr as usize)
 }
 
 pub fn normalize_map_list(map_list: &mut Vec<MemRangeData<usize>>, flags: &mut Vec<PageEntryFlags>) {
@@ -465,7 +457,7 @@ pub fn normalize_map_list(map_list: &mut Vec<MemRangeData<usize>>, flags: &mut V
     }
 }
 
-pub fn get_addr(addr: VirtAddr) -> result::Result<PhysAddr> {
+pub fn get_addr(addr: VirtAddr) -> Wirt<PhysAddr> {
     let cr3 = Cr3::read().0;
     let l5 = Cr4::read().contains(Cr4Flags::L5_PAGING);
     let mut current_table_ptr =
@@ -477,18 +469,18 @@ pub fn get_addr(addr: VirtAddr) -> result::Result<PhysAddr> {
         let entry = unsafe { &(&(*current_table_ptr))[index] };
 
         if !entry.flags().contains(PageTableFlags::PRESENT) {
-            return Error::new(ErrorType::NotFound, Some("page table entry not present")).raise();
+            return Wirt::Err(ErrorType::NotFound, Some("page table entry not present"));
         }
 
         if lev == PageLevel::Pt || entry.flags().contains(PageTableFlags::HUGE_PAGE) {
             let base_phy = entry.addr().as_u64();
             let shift = (lev_raw as u64) * 9 + 12;
             let mask = (1u64 << shift) - 1;
-            return Ok(PhysAddr::new(base_phy + (addr.as_u64() & mask)));
+            return Wirt::Ok(PhysAddr::new(base_phy + (addr.as_u64() & mask)));
         }
         current_table_ptr = (entry.addr().as_u64() + PHY_OFFSET as u64) as *const PageTable;
     }
-    Error::new(ErrorType::NotFound, None).raise()
+    Wirt::Err(ErrorType::NotFound, None)
 }
 
 pub unsafe fn dealloc_all(map: TopPageTable) {
@@ -523,7 +515,7 @@ pub fn update_paging(
     new_map_list: &mut Vec<MemRangeData<usize>>,
     new_flags: &mut Vec<PageEntryFlags>,
     allow_huge_at: PageLevel,
-) -> result::Result<UpdatePagingResults<'static>> {
+) -> Wirt<UpdatePagingResults<'static>> {
     normalize_map_list(new_map_list, new_flags);
 
     let mut buf: UpdatePagingResults  = Vec::new();
@@ -532,10 +524,10 @@ pub fn update_paging(
         let tmp_level = top.level.down().unwrap();
 
         let tmp = create_page_table(
-            new_map_list,
-            new_flags,
-            allow_huge_at,
-            top.level
+                new_map_list,
+                new_flags,
+                allow_huge_at,
+                top.level
         )?;
 
         for (l, i) in tmp.ptr().iter().enumerate() {
@@ -551,8 +543,7 @@ pub fn update_paging(
             Layout::from_size_align_unchecked(4096, 4096)
         )};
         top.page_fragmentation_level = 0;
-
-        return Ok(buf);
+        return Wirt::Ok(buf);
     }
 
      update_recursive(
@@ -568,7 +559,7 @@ pub fn update_paging(
 
     top.memory_mapping = (new_map_list.to_vec(), new_flags.to_vec());
 
-    Ok(buf)
+    Wirt::Ok(buf)
 }
 
 pub unsafe fn free_not_used_paging(dealloc_target: UpdatePagingResults) {
@@ -586,7 +577,7 @@ fn update_recursive(
     allow_huge: PageLevel,
     tmp_vec: &mut UpdatePagingResults,
     frlevel: &mut usize,
-) -> result::Result<()> {
+) -> Wirt<()> {
     fn generate_relay_entry(level: PageLevel, phys: u64) -> u64 {
         match level {
             PageLevel::Pml5 => PML5Entry::new(PAddr::from(phys), RELAY_FLAGS.to_pml5f() | PML5Flags::P).0,
@@ -703,5 +694,5 @@ fn update_recursive(
         }
     }
 
-    Ok(())
+    Wirt::Ok(())
 }

@@ -6,7 +6,7 @@ use core::fmt::{Debug, Display, Formatter};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use crate::result;
-use crate::result::{Error, ErrorType};
+use crate::result::{ErrorType, Wirt};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct OptInfo {
@@ -144,22 +144,22 @@ impl HashVariant {
         }.to_string()
     }
 
-    pub fn from_parts(algo: &str, hash: Vec<u8>) -> result::Result<HashVariant> {
+    pub fn from_parts(algo: &str, hash: Vec<u8>) -> Wirt<HashVariant> {
         match algo {
-            "SHA-1" => Ok(HashVariant::Sha1(hash)),
-            "SHA-1DC" => Ok(HashVariant::Sha1Dc(hash)),
-            "SHA2-256" => Ok(HashVariant::Sha2_256(hash)),
-            "SHA2-512" => Ok(HashVariant::Sha2_512(hash)),
-            "SHA2-512/256" => Ok(HashVariant::Sha2_512_256(hash)),
-            "SHA3-256" => Ok(HashVariant::Sha3_256(hash)),
-            "SHA3-512" => Ok(HashVariant::Sha3_512(hash)),
-            "Blake2_B" => Ok(HashVariant::Blake2B(hash)),
-            "Blake2_S" => Ok(HashVariant::Blake2S(hash)),
-            "Blake3" => Ok(HashVariant::Blake3(hash)),
-            _ => Error::new_string(
+            "SHA-1" => Wirt::Ok(HashVariant::Sha1(hash)),
+            "SHA-1DC" => Wirt::Ok(HashVariant::Sha1Dc(hash)),
+            "SHA2-256" => Wirt::Ok(HashVariant::Sha2_256(hash)),
+            "SHA2-512" => Wirt::Ok(HashVariant::Sha2_512(hash)),
+            "SHA2-512/256" => Wirt::Ok(HashVariant::Sha2_512_256(hash)),
+            "SHA3-256" => Wirt::Ok(HashVariant::Sha3_256(hash)),
+            "SHA3-512" => Wirt::Ok(HashVariant::Sha3_512(hash)),
+            "Blake2_B" => Wirt::Ok(HashVariant::Blake2B(hash)),
+            "Blake2_S" => Wirt::Ok(HashVariant::Blake2S(hash)),
+            "Blake3" => Wirt::Ok(HashVariant::Blake3(hash)),
+            _ => Wirt::Err_string(
                 ErrorType::NotSupported,
                 Some(format!("not supported hash type ({})", algo)),
-            ).raise(),
+            ),
         }
     }
 }

@@ -15,7 +15,6 @@ use x86_64::instructions::interrupts::enable_and_hlt;
 use x86_64::structures::idt::InterruptStackFrame;
 use crate::apic_helper::send_eoi;
 use crate::interrupt;
-use crate::result::{Error, ErrorType};
 use crate::thread_local::read_gs;
 use crate::timer::Timer;
 use crate::timer::tsc::TSC;
@@ -49,6 +48,7 @@ pub fn yield_now() -> YieldNow {
 }
 
 use core::marker::PhantomData;
+use crate::result::{ErrorType, Wirt};
 
 pub struct Pending<T> {
     _phantom: PhantomData<T>,
@@ -138,16 +138,16 @@ impl Executor {
         unsafe{send_eoi()};
     }
 
-    pub fn new() -> result::Result<Self> {
+    pub fn new() -> Wirt<Self> {
         if interrupt::api::add(
             65,
             Self::dummy_interrupt,
             false
         ).is_err() {
-            return Error::new(
+            return Wirt::Err(
                 ErrorType::AlreadyInitialized,
                 Some("executor already initialized"),
-            ).raise()
+            )
         }
 
         let me = Self {
@@ -164,7 +164,7 @@ impl Executor {
             ASYNC_LIST.0.write().push(me.clone());
         });
 
-        Ok(me)
+        Wirt::Ok(me)
     }
 
     pub fn get_core_inner(&self) -> Arc<CoreExecutor> {

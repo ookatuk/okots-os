@@ -39,6 +39,7 @@ pub struct Data<'a, T> {
     pub ptr: *mut T,
     pub len: u64,
     pub cap: u64,
+    pub obj_size: u64,
     pub tag: DataTag,
     _marker: core::marker::PhantomData<&'a T>,
 
@@ -56,6 +57,7 @@ impl<'a, T> Data<'a, T> {
             len: data.len() as u64,
             cap: data.len() as u64,
             tag: DataTag::empty().as_static_borrow(),
+            obj_size: size_of::<T>() as u64,
             _marker: core::marker::PhantomData,
             _pin: PhantomPinned,
         }
@@ -67,6 +69,7 @@ impl<'a, T> Data<'a, T> {
             ptr: data.as_ptr() as *mut T,
             len: data.len() as u64,
             cap: data.len() as u64,
+            obj_size: size_of::<T>() as u64,
             tag: DataTag::empty().as_static_borrow().as_mut(),
             _marker: core::marker::PhantomData,
             _pin: PhantomPinned,
@@ -82,6 +85,7 @@ impl<'a, T> Data<'a, T> {
             len: v.len() as u64,
             cap: v.capacity() as u64,
             tag: DataTag::empty(),
+            obj_size: size_of::<T>() as u64,
             _marker: core::marker::PhantomData,
             _pin: PhantomPinned,
         }
@@ -94,6 +98,7 @@ impl<'a, T> Data<'a, T> {
             len: data.len() as u64,
             cap: data.len() as u64,
             tag: DataTag(1 << 0),
+            obj_size: size_of::<T>() as u64,
             _marker: core::marker::PhantomData,
             _pin: PhantomPinned,
         }
@@ -156,6 +161,7 @@ impl<'a, T> Drop for Data<'a, T> {
     fn drop(&mut self) {
         if unlikely(self.tag.is_static() && !self.tag.borrow()) {
             log_warn!("kernel", "kernel_ffi", "dropping but invalid tag found. skipping.");
+            debug_assert!(false, "invalid DataTag state");
             return;
         }
 

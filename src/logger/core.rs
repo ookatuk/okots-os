@@ -6,7 +6,7 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 use core::ops::DerefMut;
 use core::panic::Location;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use spin::{Lazy, RwLock};
 use crate::thread_local::read_gs;
 use crate::timer::Timer;
@@ -22,6 +22,8 @@ pub(super) static LOG_BUF: Lazy<RwLock<VecDeque<Arc<OsLog>>>> =
 
 pub(super) static LOG_HEAD_ID: AtomicUsize = AtomicUsize::new(0);
 
+pub static ALLOW_LOGGING: AtomicBool = AtomicBool::new(false);
+
 
 pub(super) fn custom_internal(
     level: &'static str,
@@ -30,6 +32,10 @@ pub(super) fn custom_internal(
     text: core::fmt::Arguments,
     loc: &'static Location,
 ) {
+    if !ALLOW_LOGGING.load(Ordering::Relaxed) {
+        return
+    }
+
     let mut time = 0;
     if let Some(gs) = read_gs() {
         if gs.tsc_init {

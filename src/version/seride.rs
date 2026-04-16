@@ -3,6 +3,7 @@ use core::fmt;
 use base64::Engine;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{MapAccess, Visitor};
+use crate::log_warn;
 use crate::version::types::HashVariant;
 
 impl<'a> Serialize for HashVariant {
@@ -59,8 +60,13 @@ impl<'de> Deserialize<'de> for HashVariant {
                     de::Error::invalid_value(de::Unexpected::Str(&hex_str), &"valid base64 string")
                 })?;
 
-                HashVariant::from_parts(&algo_str, hash_bytes)
-                    .map_err(|e| de::Error::custom(e))
+                let res = HashVariant::from_parts(&algo_str, hash_bytes);
+                res.say_warns();
+                if res.is_err() {
+                    Err(de::Error::custom(res.err().unwrap()))
+                } else {
+                    Ok(unsafe{res.unwrap_unchecked()})
+                }
             }
         }
 

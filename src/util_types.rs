@@ -21,6 +21,7 @@ impl CanRangeData for u32 {}
 impl CanRangeData for u64 {}
 impl CanRangeData for u128 {}
 
+#[derive(PartialEq, Eq)]
 pub struct SmartPtr<'a, DT, GA>
 where
     DT: CanRangeData + Rem<Output = DT>,
